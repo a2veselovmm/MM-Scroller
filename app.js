@@ -178,9 +178,24 @@ function setEffectPanelEnabled(panelId, enabled) {
   $(panelId).classList.toggle("is-disabled", !enabled);
 }
 
+function getStyledHtmlForPreview() {
+  if (lastStyledHtml) return lastStyledHtml;
+  if (textEditor.innerHTML.trim()) return textEditor.innerHTML;
+  return defaultEditorHtml();
+}
+
+/** Push styled HTML to preview/export — never plain text */
+function syncPreviewFromStyled() {
+  const html = getStyledHtmlForPreview();
+  applyLayoutStyles(textEditor, textEl, getLayoutStyles());
+  textEl.innerHTML = html;
+  syncGlowLayer();
+  remeasureAndApply();
+}
+
 function applyEffectToSelectionOrDefault(effectFn) {
   if (state.editMode !== "styled") {
-    syncFromEditor();
+    syncPreviewFromStyled();
     return false;
   }
   if (hasSelectionIn(textEditor)) {
@@ -196,11 +211,11 @@ function applyEffectToSelectionOrDefault(effectFn) {
 
 function syncFromEditor() {
   if (state.editMode === "plain") {
-    textEditor.innerHTML = plainToHtml(textPlain.value);
-  } else {
-    lastStyledHtml = textEditor.innerHTML;
+    syncPreviewFromStyled();
+    return;
   }
 
+  lastStyledHtml = textEditor.innerHTML;
   applyLayoutStyles(textEditor, textEl, getLayoutStyles());
   syncEditorToPreview(textEditor, textEl);
   syncGlowLayer();
@@ -218,7 +233,7 @@ function setEditMode(mode) {
     textEditor.classList.add("hidden");
     textPlain.classList.remove("hidden");
     editModeHint.textContent =
-      "Plain text — easy line breaks and editing. Switch to Styled to format.";
+      "Plain text editor only. Preview and export keep your styled text.";
     editModeToggle.checked = false;
     viewLabelPlain.classList.add("is-active");
     viewLabelStyled.classList.remove("is-active");
@@ -248,9 +263,7 @@ function setEditMode(mode) {
 
 function applyToSelectionOrDefault(styleFn) {
   if (state.editMode !== "styled") {
-    applyLayoutStyles(textEditor, textEl, getLayoutStyles());
-    syncEditorToPreview(textEditor, textEl);
-    remeasureAndApply();
+    syncPreviewFromStyled();
     updateStyleHint(false);
     return false;
   }
@@ -541,9 +554,7 @@ function initEditor() {
     document.execCommand("insertText", false, text);
   });
 
-  textPlain.addEventListener("input", () => {
-    if (state.editMode === "plain") syncFromEditor();
-  });
+  // Plain edits do not update preview — preview stays on lastStyledHtml
 
   editModeToggle.addEventListener("change", () => {
     setEditMode(editModeToggle.checked ? "styled" : "plain");
@@ -562,7 +573,7 @@ function initAlignButtons() {
 }
 
 function initControls() {
-  initFontPicker($("font-family"), (font) => {
+  initFontPicker($("font-picker"), (font) => {
     state.fontFamily = font.family.replace(/\+/g, " ");
     applyToSelectionOrDefault(() => {
       applyStyleToSelection(textEditor, {
