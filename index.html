@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ScrollDrop — Scrolling Text Over Any Background</title>
+  <meta name="description" content="Place animated scrolling text over images, GIFs, or video. Export as WebM — no install, no server." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-icon" aria-hidden="true">▾</span>
+      <h1>ScrollDrop</h1>
+    </div>
+    <div class="header-actions">
+      <button type="button" id="btn-preview" class="btn btn-secondary">Preview</button>
+      <button type="button" id="btn-export" class="btn btn-primary">Export WebM</button>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <aside class="controls-panel" aria-label="Controls">
+      <section class="control-section">
+        <h2>Text</h2>
+        <textarea
+          id="text-input"
+          rows="8"
+          placeholder="Paste or type your scrolling text here…&#10;&#10;Line breaks create new lines.&#10;Blank lines add spacing."
+        >ScrollDrop Demo
+
+Line one of your credits
+Line two keeps rolling
+Line three — cinematic feel
+
+Add more lines to see the full scroll.</textarea>
+      </section>
+
+      <section class="control-section">
+        <h2>Style</h2>
+        <label class="control-label" for="font-family">Font</label>
+        <select id="font-family"></select>
+
+        <label class="control-label" for="font-size">
+          Size <span id="font-size-val" class="value-badge">32px</span>
+        </label>
+        <input type="range" id="font-size" min="12" max="120" value="32" />
+
+        <div class="control-row">
+          <label class="control-label" for="font-color">Color</label>
+          <input type="color" id="font-color" value="#ffffff" />
+          <label class="control-label inline" for="font-opacity">
+            Opacity <span id="font-opacity-val" class="value-badge">100%</span>
+          </label>
+          <input type="range" id="font-opacity" min="0" max="100" value="100" />
+        </div>
+
+        <label class="control-label" for="text-align">Alignment</label>
+        <div class="btn-group" role="group" aria-label="Text alignment">
+          <button type="button" class="btn-toggle" data-align="left">Left</button>
+          <button type="button" class="btn-toggle active" data-align="center">Center</button>
+          <button type="button" class="btn-toggle" data-align="right">Right</button>
+        </div>
+
+        <label class="control-label" for="line-height">
+          Line height <span id="line-height-val" class="value-badge">1.5</span>
+        </label>
+        <input type="range" id="line-height" min="1" max="3" step="0.1" value="1.5" />
+
+        <label class="control-label" for="letter-spacing">
+          Letter spacing <span id="letter-spacing-val" class="value-badge">0px</span>
+        </label>
+        <input type="range" id="letter-spacing" min="-2" max="20" value="0" />
+
+        <label class="control-label checkbox-row">
+          <input type="checkbox" id="text-shadow" />
+          Text shadow
+        </label>
+        <input type="color" id="shadow-color" value="#000000" class="shadow-color-input" disabled />
+
+        <label class="control-label" for="padding-h">
+          Horizontal padding <span id="padding-h-val" class="value-badge">48px</span>
+        </label>
+        <input type="range" id="padding-h" min="0" max="200" value="48" />
+      </section>
+
+      <section class="control-section">
+        <h2>Scroll</h2>
+        <label class="control-label" for="scroll-speed">
+          Speed <span id="scroll-speed-val" class="value-badge">80 px/s</span>
+        </label>
+        <input type="range" id="scroll-speed" min="10" max="500" value="80" />
+
+        <label class="control-label" for="start-delay">
+          Start delay <span id="start-delay-val" class="value-badge">0s</span>
+        </label>
+        <input type="range" id="start-delay" min="0" max="10" step="0.5" value="0" />
+      </section>
+
+      <section class="control-section">
+        <h2>Background</h2>
+        <label class="control-label file-upload">
+          <span class="btn btn-secondary btn-block">Upload image, GIF, or video</span>
+          <input type="file" id="bg-upload" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm" hidden />
+        </label>
+        <p id="bg-filename" class="hint">No file — gradient placeholder</p>
+
+        <label class="control-label" for="fit-mode">Fit mode</label>
+        <select id="fit-mode">
+          <option value="cover">Cover</option>
+          <option value="contain">Contain</option>
+          <option value="fill">Stretch</option>
+        </select>
+
+        <label class="control-label" for="brightness">
+          Brightness <span id="brightness-val" class="value-badge">100%</span>
+        </label>
+        <input type="range" id="brightness" min="20" max="100" value="100" />
+
+        <label class="control-label" for="blur">
+          Blur overlay <span id="blur-val" class="value-badge">0px</span>
+        </label>
+        <input type="range" id="blur" min="0" max="24" value="0" />
+
+        <label class="control-label checkbox-row">
+          <input type="checkbox" id="bg-loop" checked />
+          Loop video / GIF
+        </label>
+        <label class="control-label checkbox-row">
+          <input type="checkbox" id="bg-mute" checked />
+          Mute video
+        </label>
+      </section>
+
+      <section class="control-section">
+        <h2>Canvas</h2>
+        <label class="control-label" for="aspect-ratio">Aspect ratio</label>
+        <select id="aspect-ratio">
+          <option value="16/9">16:9 Landscape</option>
+          <option value="9/16">9:16 Portrait (Reels)</option>
+          <option value="1/1">1:1 Square</option>
+          <option value="4/3">4:3</option>
+        </select>
+      </section>
+    </aside>
+
+    <div class="preview-area">
+      <div id="preview-wrapper" class="preview-wrapper">
+        <div id="preview-canvas" class="preview-canvas" aria-label="Preview canvas">
+          <div class="bg-layer" id="bg-layer">
+            <div class="bg-placeholder" id="bg-placeholder">
+              <span>Upload a background or use the gradient</span>
+            </div>
+            <img id="bg-image" class="bg-media hidden" alt="" />
+            <video id="bg-video" class="bg-media hidden" playsinline muted loop></video>
+          </div>
+          <div class="overlay-layer" id="overlay-layer"></div>
+          <div class="text-scroll-container" id="text-scroll-container">
+            <div id="text-content" class="text-content"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="transport-bar">
+        <button type="button" id="btn-play" class="btn btn-secondary" aria-label="Play">▶ Play</button>
+        <button type="button" id="btn-pause" class="btn btn-secondary" aria-label="Pause">⏸ Pause</button>
+        <button type="button" id="btn-reset" class="btn btn-secondary" aria-label="Reset">↺ Reset</button>
+        <span id="playback-status" class="playback-status">Ready</span>
+      </div>
+
+      <div id="export-progress" class="export-progress hidden" role="status" aria-live="polite">
+        <div class="export-progress-bar"><div id="export-progress-fill"></div></div>
+        <span id="export-progress-label">Exporting…</span>
+      </div>
+    </div>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
