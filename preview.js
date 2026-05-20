@@ -1,70 +1,108 @@
 /**
- * requestAnimationFrame scroll engine — syncs with export & transport controls.
+ * requestAnimationFrame scroll engine with timeline seek/scrub support.
  */
 export class ScrollPreview {
-  /** @param {HTMLElement} canvas */
-  /** @param {HTMLElement} textEl */
-  /** @param {HTMLElement} container */
   constructor(canvas, textEl, container) {
     this.canvas = canvas;
     this.textEl = textEl;
     this.container = container;
     this.speed = 80;
     this.startDelay = 0;
+    /** Starting translateY in px (null = bottom of canvas / container height) */
+    this.scrollStartY = null;
     this.running = false;
     this.paused = false;
     this.y = 0;
     this.startY = 0;
     this.endY = 0;
+    this.timelineTime = 0;
     this.delayRemaining = 0;
     this.rafId = null;
     this.lastTs = 0;
     this.onStatus = () => {};
     this.onComplete = () => {};
+    this.onTimeUpdate = () => {};
   }
 
-  /** Measure scroll bounds after text/layout changes */
   measure() {
     const ch = this.container.clientHeight;
     const th = this.textEl.offsetHeight;
-    this.startY = ch;
+    this.containerHeight = ch;
+    this.textHeight = th;
+    this.startY =
+      this.scrollStartY != null ? this.scrollStartY : ch;
     this.endY = -th;
-    if (!this.running) {
+  }
+
+  getScrollDuration() {
+    const distance = this.startY - this.endY;
+    return distance > 0 ? distance / this.speed : 0;
+  }
+
+  getTotalDuration() {
+    return this.startDelay + this.getScrollDuration();
+  }
+
+  /** Map timeline seconds → text Y position */
+  applyTime(time) {
+    const total = this.getTotalDuration();
+    const t = Math.max(0, Math.min(time, total));
+    this.timelineTime = t;
+
+    if (t < this.startDelay) {
       this.y = this.startY;
-      this.applyTransform();
+      this.delayRemaining = this.startDelay - t;
+    } else {
+      const scrollT = t - this.startDelay;
+      this.y = Math.max(this.endY, this.startY - scrollT * this.speed);
+      this.delayRemaining = 0;
     }
+
+    this.applyTransform();
+    this.onTimeUpdate(t, total);
+    return t;
   }
 
   applyTransform() {
     this.textEl.style.transform = `translateY(${this.y}px)`;
   }
 
+  seek(time) {
+    this.applyTime(time);
+  }
+
   reset() {
     this.stop();
-    this.y = this.startY;
-    this.delayRemaining = 0;
-    this.applyTransform();
+    this.applyTime(0);
     this.onStatus("Ready");
   }
 
   play() {
     if (this.running && !this.paused) return;
     this.measure();
+
     if (this.paused) {
       this.paused = false;
       this.lastTs = performance.now();
       this.onStatus("Playing");
-      this.tick();
+      this.rafId = requestAnimationFrame(this.tick);
       return;
     }
+
+    const total = this.getTotalDuration();
+    if (this.timelineTime >= total) {
+      this.applyTime(0);
+    }
+
     this.running = true;
     this.paused = false;
-    this.y = this.startY;
-    this.delayRemaining = this.startDelay;
     this.lastTs = performance.now();
-    this.applyTransform();
-    this.onStatus(this.startDelay > 0 ? `Starting in ${this.startDelay}s…` : "Playing");
-    this.tick();
+    this.onStatus(
+      this.timelineTime < this.startDelay && this.startDelay > 0
+        ? `Starting in ${(this.startDelay - this.timelineTime).toFixed(1)}s…`
+        : "Playing"
+    );
+    this.rafId = requestAnimationFrame(this.tick);
   }
 
   pause() {
@@ -84,41 +122,33 @@ export class ScrollPreview {
 
   tick = (ts) => {
     if (!this.running || this.paused) return;
-    const dt = Math.min((ts - this.lastTs) / 1000, 0.1);
-    this.lastTs = ts;
 
-    if (this.delayRemaining > 0) {
-      this.delayRemaining -= dt;
-      if (this.delayRemaining > 0) {
-        this.onStatus(`Starting in ${this.delayRemaining.toFixed(1)}s…`);
-        this.rafId = requestAnimationFrame(this.tick);
-        return;
-      }
-      this.onStatus("Playing");
-    }
+    const now = typeof ts === "number" ? ts : performance.now();
+    const dt = Math.min((now - this.lastTs) / 1000, 0.1);
+    this.lastTs = now;
 
-    this.y -= this.speed * dt;
-    this.applyTransform();
+    const total = this.getTotalDuration();
+    const next = this.timelineTime + dt;
 
-    if (this.y <= this.endY) {
+    if (next >= total) {
+      this.applyTime(total);
       this.stop();
       this.onStatus("Complete");
       this.onComplete();
       return;
     }
 
+    this.applyTime(next);
+
+    if (this.timelineTime < this.startDelay && this.startDelay > 0) {
+      this.onStatus(`Starting in ${(this.startDelay - this.timelineTime).toFixed(1)}s…`);
+    } else {
+      this.onStatus("Playing");
+    }
+
     this.rafId = requestAnimationFrame(this.tick);
   };
 
-  /** Total duration in seconds for full scroll (delay + scroll time) */
-  getTotalDuration() {
-    this.measure();
-    const distance = this.startY - this.endY;
-    const scrollTime = distance / this.speed;
-    return this.startDelay + scrollTime;
-  }
-
-  /** Seek to start and run until complete; returns Promise */
   runToCompletion() {
     return new Promise((resolve) => {
       const prev = this.onComplete;
@@ -126,6 +156,7 @@ export class ScrollPreview {
         if (prev) prev();
         resolve();
       };
+      this.applyTime(0);
       this.play();
     });
   }

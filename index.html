@@ -22,25 +22,53 @@
     </div>
   </header>
 
-  <main class="app-main">
-    <aside class="controls-panel" aria-label="Controls">
+  <main class="app-main" id="app-main">
+    <aside class="controls-panel" id="controls-panel" aria-label="Controls">
       <section class="control-section">
         <h2>Text</h2>
-        <textarea
-          id="text-input"
-          rows="8"
-          placeholder="Paste or type your scrolling text here…&#10;&#10;Line breaks create new lines.&#10;Blank lines add spacing."
-        >ScrollDrop Demo
-
-Line one of your credits
-Line two keeps rolling
-Line three — cinematic feel
-
-Add more lines to see the full scroll.</textarea>
+        <div class="view-toggle-block">
+          <span class="view-toggle-title">View</span>
+          <div class="view-toggle" role="group" aria-label="Text view mode">
+            <span class="view-toggle-side" id="view-label-plain">Plain text</span>
+            <label class="toggle-switch" for="edit-mode-toggle">
+              <input
+                type="checkbox"
+                id="edit-mode-toggle"
+                checked
+                aria-label="Plain text or styled view"
+              />
+              <span class="toggle-track" aria-hidden="true">
+                <span class="toggle-thumb"></span>
+              </span>
+            </label>
+            <span class="view-toggle-side is-active" id="view-label-styled">Styled</span>
+          </div>
+        </div>
+        <p class="hint" id="edit-mode-hint">Styled — select words and format visually. Updates preview live.</p>
+        <div id="text-editor-wrap" class="editor-surface">
+          <div
+            id="text-editor"
+            class="text-editor"
+            contenteditable="true"
+            spellcheck="true"
+            role="textbox"
+            aria-label="Styled text editor"
+          ></div>
+          <textarea
+            id="text-plain"
+            class="text-plain hidden"
+            rows="10"
+            spellcheck="true"
+            aria-label="Plain text editor"
+            placeholder="Type or paste text here. One line per row; blank lines add spacing."
+          ></textarea>
+        </div>
       </section>
 
       <section class="control-section">
         <h2>Style</h2>
+        <p class="hint" id="style-target-hint">Adjusts selected text, or defaults for new typing</p>
+
         <label class="control-label" for="font-family">Font</label>
         <select id="font-family"></select>
 
@@ -58,47 +86,130 @@ Add more lines to see the full scroll.</textarea>
           <input type="range" id="font-opacity" min="0" max="100" value="100" />
         </div>
 
-        <label class="control-label" for="text-align">Alignment</label>
-        <div class="btn-group" role="group" aria-label="Text alignment">
-          <button type="button" class="btn-toggle" data-align="left">Left</button>
-          <button type="button" class="btn-toggle active" data-align="center">Center</button>
-          <button type="button" class="btn-toggle" data-align="right">Right</button>
+        <div class="style-toggles">
+          <button type="button" id="btn-bold" class="btn-toggle style-toggle" aria-pressed="false" title="Bold">B</button>
+          <button type="button" id="btn-italic" class="btn-toggle style-toggle" aria-pressed="false" title="Italic"><em>I</em></button>
         </div>
 
-        <label class="control-label" for="line-height">
-          Line height <span id="line-height-val" class="value-badge">1.5</span>
-        </label>
-        <input type="range" id="line-height" min="1" max="3" step="0.1" value="1.5" />
-
-        <label class="control-label" for="letter-spacing">
-          Letter spacing <span id="letter-spacing-val" class="value-badge">0px</span>
-        </label>
-        <input type="range" id="letter-spacing" min="-2" max="20" value="0" />
-
+        <h3 class="control-subhead">Stroke</h3>
         <label class="control-label checkbox-row">
-          <input type="checkbox" id="text-shadow" />
-          Text shadow
+          <input type="checkbox" id="stroke-enabled" />
+          Enable stroke
         </label>
-        <input type="color" id="shadow-color" value="#000000" class="shadow-color-input" disabled />
+        <div id="stroke-controls" class="effect-controls is-disabled">
+          <div class="control-row">
+            <label class="control-label" for="stroke-color">Color</label>
+            <input type="color" id="stroke-color" value="#000000" />
+            <label class="control-label inline" for="stroke-opacity">
+              Opacity <span id="stroke-opacity-val" class="value-badge">100%</span>
+            </label>
+            <input type="range" id="stroke-opacity" min="0" max="100" value="100" />
+          </div>
+          <label class="control-label" for="stroke-width">
+            Thickness <span id="stroke-width-val" class="value-badge">2px</span>
+          </label>
+          <input type="range" id="stroke-width" min="0.5" max="12" step="0.5" value="2" />
+        </div>
 
-        <label class="control-label" for="padding-h">
-          Horizontal padding <span id="padding-h-val" class="value-badge">48px</span>
-        </label>
-        <input type="range" id="padding-h" min="0" max="200" value="48" />
       </section>
 
-      <section class="control-section">
-        <h2>Scroll</h2>
-        <label class="control-label" for="scroll-speed">
-          Speed <span id="scroll-speed-val" class="value-badge">80 px/s</span>
-        </label>
-        <input type="range" id="scroll-speed" min="10" max="500" value="80" />
+      <details class="collapsible" id="collapsible-global" open>
+        <summary class="collapsible-summary">Layout &amp; scroll</summary>
+        <div class="collapsible-body">
+          <label class="control-label" for="text-align">Alignment</label>
+          <div class="btn-group" role="group" aria-label="Text alignment">
+            <button type="button" class="btn-toggle" data-align="left">Left</button>
+            <button type="button" class="btn-toggle active" data-align="center">Center</button>
+            <button type="button" class="btn-toggle" data-align="right">Right</button>
+          </div>
 
-        <label class="control-label" for="start-delay">
-          Start delay <span id="start-delay-val" class="value-badge">0s</span>
+          <label class="control-label" for="line-height">
+            Line height <span id="line-height-val" class="value-badge">1.5</span>
+          </label>
+          <input type="range" id="line-height" min="1" max="3" step="0.1" value="1.5" />
+
+          <label class="control-label" for="letter-spacing">
+            Letter spacing <span id="letter-spacing-val" class="value-badge">0px</span>
+          </label>
+          <input type="range" id="letter-spacing" min="-2" max="20" value="0" />
+
+          <label class="control-label" for="padding-h">
+            Horizontal padding <span id="padding-h-val" class="value-badge">48px</span>
+          </label>
+          <input type="range" id="padding-h" min="0" max="200" value="48" />
+
+          <label class="control-label" for="scroll-speed">
+            Scroll speed <span id="scroll-speed-val" class="value-badge">80 px/s</span>
+          </label>
+          <input type="range" id="scroll-speed" min="10" max="500" value="80" />
+
+          <label class="control-label" for="start-delay">
+            Start delay <span id="start-delay-val" class="value-badge">0s</span>
+          </label>
+          <input type="range" id="start-delay" min="0" max="10" step="0.5" value="0" />
+
+          <label class="control-label" for="scroll-start">
+            Scroll position at start <span id="scroll-start-val" class="value-badge">—</span>
+          </label>
+          <input type="range" id="scroll-start" min="0" max="800" value="400" />
+          <p class="hint">Vertical position (px) of text on the first frame. Higher = lower on screen.</p>
+        </div>
+      </details>
+
+      <details class="collapsible" id="collapsible-effects">
+        <summary class="collapsible-summary">Text effects</summary>
+        <div class="collapsible-body">
+          <p class="hint">Select styled text to apply shadow to a selection only.</p>
+
+          <h3 class="control-subhead">Drop shadow</h3>
+        <label class="control-label checkbox-row">
+          <input type="checkbox" id="shadow-enabled" />
+          Enable drop shadow
         </label>
-        <input type="range" id="start-delay" min="0" max="10" step="0.5" value="0" />
-      </section>
+        <div id="shadow-controls" class="effect-controls is-disabled">
+          <div class="control-row">
+            <label class="control-label" for="shadow-color">Color</label>
+            <input type="color" id="shadow-color" value="#000000" />
+            <label class="control-label inline" for="shadow-opacity">
+              Opacity <span id="shadow-opacity-val" class="value-badge">85%</span>
+            </label>
+            <input type="range" id="shadow-opacity" min="0" max="100" value="85" />
+          </div>
+          <label class="control-label" for="shadow-softness">
+            Softness <span id="shadow-softness-val" class="value-badge">8px</span>
+          </label>
+          <input type="range" id="shadow-softness" min="0" max="40" value="8" />
+        </div>
+
+        <h3 class="control-subhead">Blur behind text</h3>
+        <label class="control-label checkbox-row">
+          <input type="checkbox" id="glow-enabled" />
+          Enable blur behind
+        </label>
+        <div id="glow-controls" class="effect-controls is-disabled">
+          <div class="control-row">
+            <label class="control-label" for="glow-color">Color</label>
+            <input type="color" id="glow-color" value="#000000" />
+            <label class="control-label inline" for="glow-opacity">
+              Opacity <span id="glow-opacity-val" class="value-badge">60%</span>
+            </label>
+            <input type="range" id="glow-opacity" min="0" max="100" value="60" />
+          </div>
+          <label class="control-label" for="glow-radius">
+            Radius <span id="glow-radius-val" class="value-badge">24px</span>
+          </label>
+          <input type="range" id="glow-radius" min="0" max="80" value="24" />
+          <label class="control-label" for="glow-sharpness">
+            Sharpness <span id="glow-sharpness-val" class="value-badge">12px</span>
+          </label>
+          <input type="range" id="glow-sharpness" min="0" max="40" value="12" />
+          <label class="control-label" for="glow-softness">
+            Softness <span id="glow-softness-val" class="value-badge">50</span>
+          </label>
+          <input type="range" id="glow-softness" min="0" max="100" value="50" />
+        </div>
+        </div>
+      </details>
 
       <section class="control-section">
         <h2>Background</h2>
@@ -140,35 +251,53 @@ Add more lines to see the full scroll.</textarea>
         <label class="control-label" for="aspect-ratio">Aspect ratio</label>
         <select id="aspect-ratio">
           <option value="16/9">16:9 Landscape</option>
-          <option value="9/16">9:16 Portrait (Reels)</option>
+          <option value="9/16" selected>9:16 Portrait (Reels)</option>
           <option value="1/1">1:1 Square</option>
           <option value="4/3">4:3</option>
         </select>
       </section>
     </aside>
 
+    <div class="panel-resizer" id="panel-resizer" role="separator" aria-orientation="vertical" aria-label="Resize side panel" tabindex="0"></div>
+
     <div class="preview-area">
       <div id="preview-wrapper" class="preview-wrapper">
-        <div id="preview-canvas" class="preview-canvas" aria-label="Preview canvas">
+        <div id="preview-canvas" class="preview-canvas" data-aspect="9/16" aria-label="Preview canvas">
           <div class="bg-layer" id="bg-layer">
             <div class="bg-placeholder" id="bg-placeholder">
               <span>Upload a background or use the gradient</span>
             </div>
             <img id="bg-image" class="bg-media hidden" alt="" />
-            <video id="bg-video" class="bg-media hidden" playsinline muted loop></video>
+            <video id="bg-video" class="bg-media hidden" playsinline muted loop preload="metadata"></video>
           </div>
           <div class="overlay-layer" id="overlay-layer"></div>
           <div class="text-scroll-container" id="text-scroll-container">
+            <div id="text-glow-back" class="text-glow-back hidden" aria-hidden="true"></div>
             <div id="text-content" class="text-content"></div>
           </div>
         </div>
       </div>
 
       <div class="transport-bar">
-        <button type="button" id="btn-play" class="btn btn-secondary" aria-label="Play">▶ Play</button>
-        <button type="button" id="btn-pause" class="btn btn-secondary" aria-label="Pause">⏸ Pause</button>
+        <button type="button" id="btn-play-pause" class="btn btn-secondary" aria-label="Play">▶ Play</button>
         <button type="button" id="btn-reset" class="btn btn-secondary" aria-label="Reset">↺ Reset</button>
         <span id="playback-status" class="playback-status">Ready</span>
+      </div>
+
+      <div class="timeline-bar" id="timeline-bar">
+        <span id="time-current" class="timeline-time">0:00.0</span>
+        <input
+          type="range"
+          id="timeline-scrub"
+          class="timeline-scrub"
+          min="0"
+          max="1000"
+          value="0"
+          step="1"
+          aria-label="Timeline position"
+        />
+        <span id="time-total" class="timeline-time">0:00.0</span>
+        <span id="timeline-duration-label" class="timeline-hint">End video length</span>
       </div>
 
       <div id="export-progress" class="export-progress hidden" role="status" aria-live="polite">

@@ -1,9 +1,206 @@
 /**
  * Export preview to WebM via MediaRecorder + canvas captureStream.
- * Frames are captured in sync with the scroll engine tick.
  */
 
+import {
+  hexToRgba,
+  buildGlowShadowStack,
+} from "./textEffects.js";
+
 const FPS = 30;
+
+function parseShadow(cs, rootStyle) {
+  const sh = cs.textShadow;
+  if (!sh || sh === "none") {
+    const rsh = rootStyle.textShadow;
+    if (!rsh || rsh === "none") return null;
+    return parseShadowString(rsh);
+  }
+  return parseShadowString(sh);
+}
+
+function parseShadowString(sh) {
+  const m = sh.match(
+    /rgba?\([^)]+\)|#[0-9a-f]+|\d+\.?\d*px/gi
+  );
+  if (!m || m.length < 3) return { blur: 8, color: "rgba(0,0,0,0.8)", ox: 0, oy: 2 };
+  const parts = sh.split(/\s+(?![^(]*\))/);
+  let color = "rgba(0,0,0,0.85)";
+  let blur = 8;
+  let ox = 0;
+  let oy = 2;
+  for (const p of parts) {
+    if (p.includes("rgb") || p.startsWith("#")) color = p;
+    else if (p.endsWith("px")) {
+      const v = parseFloat(p);
+      if (blur === 8 && v > 0 && v < 100) blur = v;
+      else if (ox === 0) ox = v;
+      else oy = v;
+    }
+  }
+  return { blur, color, ox, oy };
+}
+
+function segmentStyle(rootStyle, spanEl) {
+  const cs = spanEl ? getComputedStyle(spanEl) : rootStyle;
+  const fontSize = parseFloat(cs.fontSize);
+  return {
+    font: `${cs.fontStyle} ${cs.fontWeight} ${fontSize}px ${cs.fontFamily}`,
+    fontSize,
+    color: cs.color,
+    opacity: parseFloat(cs.opacity),
+    shadow: parseShadow(cs, rootStyle),
+    strokeWidth: parseFloat(cs.webkitTextStrokeWidth) || 0,
+    strokeColor: cs.webkitTextStrokeColor || "transparent",
+  };
+}
+
+function collectLineSegments(lineEl, rootStyle) {
+  const segments = [];
+
+  function walk(node, spanEl) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent;
+      if (text) segments.push({ text, ...segmentStyle(rootStyle, spanEl) });
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const nextSpan =
+      node.tagName === "SPAN" &&
+      (node.classList.contains("text-run") ||
+        node.classList.contains("text-span"))
+        ? node
+        : spanEl;
+    for (const child of node.childNodes) walk(child, nextSpan);
+  }
+
+  for (const child of lineEl.childNodes) walk(child, null);
+  return segments;
+}
+
+function measureSegments(ctx, segments) {
+  let w = 0;
+  for (const seg of segments) {
+    ctx.save();
+    ctx.font = seg.font;
+    w += ctx.measureText(seg.text).width;
+    ctx.restore();
+  }
+  return w;
+}
+
+function drawSegment(ctx, seg, x, y) {
+  ctx.save();
+  ctx.font = seg.font;
+  ctx.globalAlpha = seg.opacity;
+  ctx.textBaseline = "top";
+  ctx.textAlign = "left";
+
+  if (seg.shadow) {
+    ctx.shadowColor = seg.shadow.color;
+    ctx.shadowBlur = seg.shadow.blur;
+    ctx.shadowOffsetX = seg.shadow.ox;
+    ctx.shadowOffsetY = seg.shadow.oy;
+  }
+
+  if (seg.strokeWidth > 0) {
+    ctx.lineWidth = seg.strokeWidth;
+    ctx.strokeStyle = seg.strokeColor;
+    ctx.lineJoin = "round";
+    ctx.strokeText(seg.text, x, y);
+  }
+
+  ctx.fillStyle = seg.color;
+  ctx.fillText(seg.text, x, y);
+  ctx.restore();
+}
+
+function drawRichText(ctx, textContent, canvasW, ty, options = {}) {
+  const rootStyle = getComputedStyle(textContent);
+  const pad = parseInt(rootStyle.paddingLeft, 10) || 0;
+  const align = rootStyle.textAlign;
+  const lineHeightPx =
+    parseFloat(rootStyle.fontSize) * parseFloat(rootStyle.lineHeight);
+  const glowMode = options.mode === "glow";
+  const glowColor = options.glowColor || "#000";
+
+  const lines = textContent.querySelectorAll(".text-line");
+  let y = ty;
+
+  for (const lineEl of lines) {
+    const segments = collectLineSegments(lineEl, rootStyle);
+    if (!segments.length) {
+      y += lineHeightPx;
+      continue;
+    }
+
+    const lineWidth = measureSegments(ctx, segments);
+    let x = pad;
+    if (align === "center") x = (canvasW - lineWidth) / 2;
+    else if (align === "right") x = canvasW - pad - lineWidth;
+
+    let lineAdvance = lineHeightPx;
+    for (const seg of segments) {
+      if (glowMode) {
+        ctx.save();
+        ctx.font = seg.font;
+        ctx.globalAlpha = options.glowOpacity ?? 0.6;
+        ctx.textBaseline = "top";
+        ctx.textAlign = "left";
+        ctx.fillStyle = glowColor;
+        const stacks = buildGlowShadowStack({
+          color: options.glowColorHex || "#000000",
+          opacity: options.glowOpacity ?? 0.6,
+          radius: options.glowRadius ?? 24,
+          softness: options.glowSoftness ?? 50,
+        });
+        if (stacks !== "none") {
+          ctx.shadowColor = "transparent";
+          const parts = stacks.split(", ");
+          for (const part of parts) {
+            const m = part.match(/0 0 ([\d.]+)px (rgba?\([^)]+\))/);
+            if (m) {
+              ctx.shadowBlur = parseFloat(m[1]);
+              ctx.shadowColor = m[2];
+              ctx.fillText(seg.text, x, y);
+            }
+          }
+        }
+        ctx.fillText(seg.text, x, y);
+        ctx.restore();
+      } else {
+        drawSegment(ctx, seg, x, y);
+      }
+      ctx.save();
+      ctx.font = seg.font;
+      x += ctx.measureText(seg.text).width;
+      lineAdvance = Math.max(
+        lineAdvance,
+        seg.fontSize * parseFloat(rootStyle.lineHeight)
+      );
+      ctx.restore();
+    }
+    y += lineAdvance;
+  }
+}
+
+function readGlowState(canvasEl) {
+  const glow = canvasEl.querySelector("#text-glow-back");
+  if (!glow || glow.classList.contains("hidden")) {
+    return { enabled: false };
+  }
+  const cs = getComputedStyle(glow);
+  const blur = parseFloat(cs.getPropertyValue("--glow-blur")) || 12;
+  return {
+    enabled: true,
+    sharpness: blur,
+    opacity: parseFloat(cs.opacity) || 0.6,
+    color: cs.color || "#000",
+    colorHex: canvasEl.dataset.glowColor || "#000000",
+    radius: parseFloat(canvasEl.dataset.glowRadius || "24"),
+    softness: parseFloat(canvasEl.dataset.glowSoftness || "50"),
+  };
+}
 
 function pickMimeType() {
   const types = [
@@ -17,12 +214,6 @@ function pickMimeType() {
   return "";
 }
 
-/**
- * Record the preview while `runAnimation` drives scroll (same timing as preview).
- * @param {HTMLElement} canvasEl
- * @param {() => Promise<void>} runAnimation - plays scroll to completion
- * @param {{ onProgress?: (pct: number) => void, onStatus?: (msg: string) => void }} hooks
- */
 export async function exportToWebM(canvasEl, runAnimation, hooks = {}) {
   const { onProgress = () => {}, onStatus = () => {} } = hooks;
 
@@ -68,6 +259,7 @@ export async function exportToWebM(canvasEl, runAnimation, hooks = {}) {
     const placeholder = canvasEl.querySelector("#bg-placeholder:not(.hidden)");
     const overlay = canvasEl.querySelector("#overlay-layer");
     const textContent = canvasEl.querySelector("#text-content");
+    const glowState = readGlowState(canvasEl);
 
     ctx.fillStyle = "#111118";
     ctx.fillRect(0, 0, w, h);
@@ -123,7 +315,7 @@ export async function exportToWebM(canvasEl, runAnimation, hooks = {}) {
     }
 
     const brightness = parseInt(overlay?.dataset.brightness ?? "100", 10);
-    const blur = parseFloat(overlay?.dataset.blur ?? "0");
+    const bgBlur = parseFloat(overlay?.dataset.blur ?? "0");
     const darken = 1 - brightness / 100;
     if (darken > 0) {
       ctx.fillStyle = `rgba(0,0,0,${darken})`;
@@ -131,43 +323,36 @@ export async function exportToWebM(canvasEl, runAnimation, hooks = {}) {
     }
 
     if (textContent) {
-      const style = getComputedStyle(textContent);
-      const pad = parseInt(style.paddingLeft, 10) || 0;
-      const fontSize = parseFloat(style.fontSize);
-      const lineHeightPx = fontSize * parseFloat(style.lineHeight);
-
-      ctx.save();
-      ctx.font = `${style.fontWeight} ${fontSize}px ${style.fontFamily}`;
-      ctx.fillStyle = style.color;
-      ctx.textAlign = style.textAlign;
-      ctx.textBaseline = "top";
-
-      if (style.textShadow && style.textShadow !== "none") {
-        ctx.shadowColor = "rgba(0,0,0,0.85)";
-        ctx.shadowBlur = 8;
-        ctx.shadowOffsetX = 2;
-        ctx.shadowOffsetY = 2;
-      }
-
       const transform = textContent.style.transform;
       const match = transform.match(/translateY\((-?[\d.]+)px\)/);
       const ty = match ? parseFloat(match[1]) : h;
 
-      const lines = textContent.textContent.split("\n");
-      let y = ty;
-      for (const line of lines) {
-        let x = pad;
-        if (style.textAlign === "center") x = w / 2;
-        else if (style.textAlign === "right") x = w - pad;
-        ctx.fillText(line, x, y);
-        y += lineHeightPx;
+      if (glowState.enabled) {
+        ctx.save();
+        ctx.filter = `blur(${glowState.sharpness}px)`;
+        const scale = 1 + glowState.radius / 300;
+        ctx.translate(w / 2, 0);
+        ctx.scale(scale, 1);
+        ctx.translate(-w / 2, 0);
+        drawRichText(ctx, textContent, w, ty, {
+          mode: "glow",
+          glowColor: glowState.color,
+          glowColorHex: glowState.colorHex,
+          glowOpacity: glowState.opacity,
+          glowRadius: glowState.radius,
+          glowSoftness: glowState.softness,
+        });
+        ctx.restore();
       }
+
+      ctx.save();
+      drawRichText(ctx, textContent, w, ty);
       ctx.restore();
     }
 
-    if (blur > 0) {
+    if (bgBlur > 0) {
       const snap = ctx.getImageData(0, 0, w, h);
-      ctx.filter = `blur(${blur}px)`;
+      ctx.filter = `blur(${bgBlur}px)`;
       ctx.putImageData(snap, 0, 0);
       ctx.filter = "none";
     }
