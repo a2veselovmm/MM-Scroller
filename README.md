@@ -1,18 +1,21 @@
 # ScrollDrop
 
-Browser-based tool to place animated scrolling text over any background — image, GIF, or video. No server, no install. Export as WebM.
+Browser-based tool to place animated scrolling text over any background — image, GIF, or video. No server, no install. Export as WebM or MP4.
 
 ## Features
 
 - Multi-line text with blank-line spacers
 - Background upload (JPG, PNG, WebP, GIF, MP4, WebM)
-- Font picker (10 curated Google Fonts), size, color, opacity, alignment
+- Background audio upload (MP3, WAV) with volume control
+- Video volume control when using a video background
+- Font picker (32 curated Google Fonts), size, color, opacity, alignment
 - Line height, letter spacing, text shadow, horizontal padding
 - Scroll speed (10–500 px/s) and start delay
 - Background fit (cover / contain / stretch), brightness & blur overlay
+- Loop / play-once when scroll is longer than the clip
 - Aspect ratios: 16:9, 9:16, 1:1, 4:3
 - Live preview with play / pause / reset
-- Export to `.webm` via MediaRecorder
+- Export to **WebM** or **MP4** via offline frame render + ffmpeg.wasm (stable 30 fps)
 
 ## Local development
 
@@ -47,15 +50,20 @@ vercel --prod
 ├── style.css     # UI styles
 ├── app.js        # Controls & state
 ├── preview.js    # rAF scroll engine
-├── export.js     # WebM export
-└── fonts.js      # Google Fonts loader
+├── export.js           # Frame capture + export orchestration
+├── frameEncoder.js     # ffmpeg.wasm frame sequence → WebM/MP4
+├── mp4Export.js        # Legacy WebM→MP4 transcode helper
+├── audioSync.js        # Preview & export audio routing
+├── backgroundMedia.js  # GIF timeline + media time mapping
+└── fonts.js            # Google Fonts loader
 ```
 
 ## Browser notes
 
 - Best export experience: **Chrome** or **Edge**
-- Safari has limited MediaRecorder WebM support
-- Phase 3 (optional): ffmpeg.wasm for MP4 — requires COOP/COEP headers (already set in `vercel.json` for future use)
+- MP4 export downloads ffmpeg.wasm on first use (~25 MB); needs COOP/COEP headers (`vercel.json` included for Vercel deploys)
+- Export renders each frame at a fixed timeline position (same idea as [Remotion](https://www.remotion.dev/docs/ai/skills) `useCurrentFrame()`), then encodes at 30 fps — not realtime screen recording
+- Optional: `npx skills add remotion-dev/skills` for Remotion project conventions when extending this app
 
 ## License
 

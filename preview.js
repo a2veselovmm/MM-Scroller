@@ -26,7 +26,7 @@ export class ScrollPreview {
 
   measure() {
     const ch = this.container.clientHeight;
-    const th = this.textEl.offsetHeight;
+    const th = Math.max(this.textEl.offsetHeight, 1);
     this.containerHeight = ch;
     this.textHeight = th;
     this.startY =

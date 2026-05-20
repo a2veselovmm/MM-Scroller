@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ScrollDrop — Scrolling Text Over Any Background</title>
-  <meta name="description" content="Place animated scrolling text over images, GIFs, or video. Export as WebM — no install, no server." />
+  <meta name="description" content="Place animated scrolling text over images, GIFs, or video. Export as WebM or MP4 — no install, no server." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -18,7 +18,14 @@
     </div>
     <div class="header-actions">
       <button type="button" id="btn-preview" class="btn btn-secondary">Preview</button>
-      <button type="button" id="btn-export" class="btn btn-primary">Export WebM</button>
+      <label class="export-format-label">
+        <span class="sr-only">Export format</span>
+        <select id="export-format" class="export-format-select" aria-label="Export format">
+          <option value="webm">WebM</option>
+          <option value="mp4">MP4</option>
+        </select>
+      </label>
+      <button type="button" id="btn-export" class="btn btn-primary">Export</button>
     </div>
   </header>
 
@@ -236,14 +243,29 @@
         </label>
         <input type="range" id="blur" min="0" max="24" value="0" />
 
-        <label class="control-label checkbox-row">
-          <input type="checkbox" id="bg-loop" checked />
-          Loop video / GIF
+        <div id="bg-media-options" class="bg-media-options hidden">
+          <label class="control-label" for="bg-repeat">When scroll is longer than clip</label>
+          <select id="bg-repeat">
+            <option value="loop" selected>Loop</option>
+            <option value="once">Play once, then hold last frame</option>
+          </select>
+          <p id="bg-repeat-hint" class="hint hidden"></p>
+        </div>
+        <div id="bg-video-audio-options" class="bg-audio-block hidden">
+          <label class="control-label" for="bg-video-volume">
+            Video volume <span id="bg-video-volume-val" class="value-badge">0%</span>
+          </label>
+          <input type="range" id="bg-video-volume" min="0" max="100" value="0" />
+        </div>
+        <label class="control-label file-upload">
+          <span class="btn btn-secondary btn-block">Upload background audio (MP3, WAV)</span>
+          <input type="file" id="bg-audio-upload" accept="audio/mpeg,audio/wav,audio/mp3,.mp3,.wav" hidden />
         </label>
-        <label class="control-label checkbox-row">
-          <input type="checkbox" id="bg-mute" checked />
-          Mute video
+        <p id="bg-audio-filename" class="hint">No background audio</p>
+        <label class="control-label" for="bg-audio-volume">
+          Audio volume <span id="bg-audio-volume-val" class="value-badge">100%</span>
         </label>
+        <input type="range" id="bg-audio-volume" min="0" max="100" value="100" />
       </section>
 
       <section class="control-section">
@@ -268,7 +290,9 @@
               <span>Upload a background or use the gradient</span>
             </div>
             <img id="bg-image" class="bg-media hidden" alt="" />
-            <video id="bg-video" class="bg-media hidden" playsinline muted loop preload="metadata"></video>
+            <canvas id="bg-gif-canvas" class="bg-media bg-gif-canvas hidden" aria-hidden="true"></canvas>
+            <video id="bg-video" class="bg-media hidden" playsinline preload="auto"></video>
+            <audio id="bg-audio" class="hidden" preload="auto"></audio>
           </div>
           <div class="overlay-layer" id="overlay-layer"></div>
           <div class="text-scroll-container" id="text-scroll-container">
