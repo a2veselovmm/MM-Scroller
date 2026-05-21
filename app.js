@@ -2,6 +2,13 @@ import { initFontPicker } from "./fonts.js";
 import { ScrollPreview } from "./preview.js";
 import { exportRecording, downloadBlob } from "./export.js";
 import {
+  buildProjectDocument,
+  downloadProjectJson,
+  estimateProjectSize,
+  urlToDataPayload,
+  cleanBgFileName,
+} from "./projectIO.js";
+import {
   applyMediaVolume,
   syncBgAudioToTimeline,
 } from "./audioSync.js";
@@ -1195,6 +1202,7 @@ async function runExport() {
   exportBtn.disabled = true;
   btnPlayPause.disabled = true;
   $("btn-preview").disabled = true;
+  $("btn-save-project").disabled = true;
   timelineScrub.disabled = true;
   progressEl.classList.remove("hidden");
   canvas.classList.add("is-recording");
@@ -1264,14 +1272,113 @@ async function runExport() {
     exportBtn.disabled = false;
     btnPlayPause.disabled = false;
     $("btn-preview").disabled = false;
+    $("btn-save-project").disabled = false;
     timelineScrub.disabled = false;
     canvas.classList.remove("is-recording");
     setTimeout(() => progressEl.classList.add("hidden"), 3000);
   }
 }
 
+function serializeSettings() {
+  const { bgUrl: _bgUrl, ...settings } = state;
+  return {
+    ...settings,
+    scrollStartY: state.scrollStartY,
+  };
+}
+
+async function collectProjectMedia() {
+  let background = null;
+
+  if (state.bgType === "video" && bgVideo.src) {
+    background = await urlToDataPayload(
+      bgVideo.currentSrc || bgVideo.src,
+      cleanBgFileName($("bg-filename").textContent),
+      { type: "video" }
+    );
+  } else if (state.bgType === "gif" && bgObjectUrl) {
+    background = await urlToDataPayload(
+      bgObjectUrl,
+      cleanBgFileName($("bg-filename").textContent),
+      { type: "gif" }
+    );
+  } else if (state.bgType === "image" && bgImage.src) {
+    background = await urlToDataPayload(
+      bgImage.currentSrc || bgImage.src,
+      cleanBgFileName($("bg-filename").textContent),
+      { type: "image", animatedGif: state.animatedGif }
+    );
+  }
+
+  let audio = null;
+  if (bgAudio.src) {
+    const audioName = $("bg-audio-filename").textContent;
+    if (!audioName.startsWith("No background")) {
+      audio = await urlToDataPayload(bgAudio.currentSrc || bgAudio.src, audioName, {
+        type: "audio",
+      });
+    }
+  }
+
+  return { background, audio };
+}
+
+async function saveProjectJson() {
+  if (isExporting) return;
+
+  const btn = $("btn-save-project");
+  btn.disabled = true;
+  const prevLabel = btn.textContent;
+  btn.textContent = "Saving…";
+
+  try {
+    syncFromEditor();
+
+    const media = await collectProjectMedia();
+    const doc = await buildProjectDocument({
+      settings: serializeSettings(),
+      text: {
+        editMode: state.editMode,
+        styledHtml: lastStyledHtml || textEditor.innerHTML,
+        plainText: textPlain.value,
+      },
+      media,
+      timeline: {
+        position: engine.timelineTime,
+        speed: engine.speed,
+        startDelay: engine.startDelay,
+        scrollStartY: engine.scrollStartY,
+      },
+      ui: {
+        exportFormat: $("export-format").value,
+      },
+    });
+
+    const bytes = estimateProjectSize(doc);
+    if (bytes > 25 * 1024 * 1024) {
+      const mb = (bytes / (1024 * 1024)).toFixed(1);
+      const ok = confirm(
+        `This project file will be about ${mb} MB (media is embedded). Save anyway?`
+      );
+      if (!ok) return;
+    }
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadProjectJson(doc, `scrolldrop-project-${stamp}.json`);
+    playbackStatus.textContent = "Project saved as JSON";
+  } catch (err) {
+    console.error(err);
+    alert(`Could not save project: ${err.message}`);
+    playbackStatus.textContent = "Project save failed";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = prevLabel;
+  }
+}
+
 function initExport() {
   $("btn-export").addEventListener("click", runExport);
+  $("btn-save-project").addEventListener("click", saveProjectJson);
 }
 
 function initCollapsibles() {
