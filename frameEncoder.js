@@ -106,14 +106,12 @@ async function execWithTimeout(ffmpeg, args, timeoutMs, label = "Encoding") {
 }
 
 const X264_FAST = ["-preset", "ultrafast", "-tune", "fastdecode"];
-const VP8_FAST = ["-deadline", "realtime", "-cpu-used", "5"];
 
 /**
  * @param {object} opts
  * @param {number} opts.fps
  * @param {number} opts.frameCount
  * @param {number} opts.totalDuration — scroll timeline length in seconds
- * @param {'webm'|'mp4'} opts.format
  * @param {(frameIndex: number, timeSec: number) => Promise<Blob>} opts.renderFrame
  * @param {object} opts.audio
  */
@@ -122,7 +120,6 @@ export async function encodeFrameSequence(opts) {
     fps,
     frameCount,
     totalDuration,
-    format,
     renderFrame,
     audio = {},
     onProgress = () => {},
@@ -156,105 +153,43 @@ export async function encodeFrameSequence(opts) {
   onStatus(`Encoding video (${totalFrames} frames)…`);
   onProgress(68);
 
-  const staged = format === "webm" ? "staged.webm" : "staged.mp4";
-  const videoArgs =
-    format === "webm"
-      ? [
-          "-y",
-          "-framerate",
-          String(fps),
-          "-start_number",
-          "1",
-          "-i",
-          "frame_%05d.jpg",
-          "-frames:v",
-          String(totalFrames),
-          "-r",
-          String(fps),
-          "-vsync",
-          "cfr",
-          "-c:v",
-          "libvpx-vp8",
-          ...VP8_FAST,
-          "-pix_fmt",
-          "yuv420p",
-          "-b:v",
-          "6M",
-          "-an",
-          staged,
-        ]
-      : [
-          "-y",
-          "-framerate",
-          String(fps),
-          "-start_number",
-          "1",
-          "-i",
-          "frame_%05d.jpg",
-          "-frames:v",
-          String(totalFrames),
-          "-r",
-          String(fps),
-          "-vsync",
-          "cfr",
-          "-c:v",
-          "libx264",
-          ...X264_FAST,
-          "-profile:v",
-          "baseline",
-          "-level",
-          "3.0",
-          "-pix_fmt",
-          "yuv420p",
-          "-movflags",
-          "+faststart",
-          "-tag:v",
-          "avc1",
-          "-an",
-          staged,
-        ];
+  const stagedPath = "staged.mp4";
+  const videoArgs = [
+    "-y",
+    "-framerate",
+    String(fps),
+    "-start_number",
+    "1",
+    "-i",
+    "frame_%05d.jpg",
+    "-frames:v",
+    String(totalFrames),
+    "-r",
+    String(fps),
+    "-vsync",
+    "cfr",
+    "-c:v",
+    "libx264",
+    ...X264_FAST,
+    "-profile:v",
+    "baseline",
+    "-level",
+    "3.0",
+    "-pix_fmt",
+    "yuv420p",
+    "-movflags",
+    "+faststart",
+    "-tag:v",
+    "avc1",
+    "-an",
+    stagedPath,
+  ];
 
-  let stagedPath = staged;
-  try {
-    await execWithTimeout(ffmpeg, videoArgs, encodeTimeout, "Video encoding");
-  } catch (err) {
-    if (format !== "webm") throw err;
-    onStatus("WebM codec unavailable — using H.264…");
-    stagedPath = "staged.mp4";
-    await execWithTimeout(
-      ffmpeg,
-      [
-        "-y",
-        "-framerate",
-        String(fps),
-        "-start_number",
-        "1",
-        "-i",
-        "frame_%05d.jpg",
-        "-frames:v",
-        String(totalFrames),
-        "-r",
-        String(fps),
-        "-vsync",
-        "cfr",
-        "-c:v",
-        "libx264",
-        ...X264_FAST,
-        "-pix_fmt",
-        "yuv420p",
-        "-movflags",
-        "+faststart",
-        "-an",
-        stagedPath,
-      ],
-      encodeTimeout,
-      "Video encoding"
-    );
-  }
+  await execWithTimeout(ffmpeg, videoArgs, encodeTimeout, "Video encoding");
 
   await cleanupFrames(ffmpeg, totalFrames);
 
-  const outputName = format === "webm" ? "output.webm" : "output.mp4";
+  const outputName = "output.mp4";
 
   if (!hasExportAudio(audio)) {
     await execWithTimeout(
@@ -266,7 +201,7 @@ export async function encodeFrameSequence(opts) {
     await ffmpeg.deleteFile(stagedPath).catch(() => {});
     const data = await ffmpeg.readFile(outputName);
     onProgress(100);
-    return toBlob(data, format === "webm" ? "video/webm" : "video/mp4");
+    return toBlob(data, "video/mp4");
   }
 
   onStatus("Mixing audio…");
@@ -279,7 +214,11 @@ export async function encodeFrameSequence(opts) {
 
   if (audio.musicSrc && audio.musicVolume > 0) {
     await ffmpeg.writeFile("src_music", await fetchFile(audio.musicSrc));
-    inputs.push("-stream_loop", "-1", "-i", "src_music");
+    if (audio.musicLoop !== false) {
+      inputs.push("-stream_loop", "-1", "-i", "src_music");
+    } else {
+      inputs.push("-i", "src_music");
+    }
     const vol = Math.max(0, Math.min(1, audio.musicVolume / 100));
     filter.push(`[${audioInputIndex}:a]volume=${vol}[music]`);
     mixLabels.push("[music]");
@@ -303,7 +242,7 @@ export async function encodeFrameSequence(opts) {
     mapAudio = "[aout]";
   }
 
-  const audioCodec = format === "webm" ? "libopus" : "aac";
+  const audioCodec = "aac";
 
   inputs.push(
     "-t",
@@ -345,7 +284,7 @@ export async function encodeFrameSequence(opts) {
   await ffmpeg.deleteFile("src_voice").catch(() => {});
 
   const data = await ffmpeg.readFile(outputName);
-  const blob = toBlob(data, format === "webm" ? "video/webm" : "video/mp4");
+  const blob = toBlob(data, "video/mp4");
   if (blob.size < 1024) {
     throw new Error("Export file is empty. Try Chrome or a shorter scroll duration.");
   }

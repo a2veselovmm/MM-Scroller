@@ -37,9 +37,20 @@ export function syncBgAudioToTimeline(
     return;
   }
 
-  audioEl.pause();
-  if (Math.abs(audioEl.currentTime - target) > 0.02) {
-    audioEl.currentTime = target;
+  audioEl.loop = false;
+  const onceTarget = mapBackgroundTime(time, duration, "once");
+
+  if (time >= duration) {
+    audioEl.pause();
+    audioEl.currentTime = Math.max(0, duration - 0.001);
+    return;
+  }
+
+  if (audioEl.paused || audioEl.ended) {
+    audioEl.currentTime = onceTarget;
+    audioEl.play().catch(() => {});
+  } else if (Math.abs(audioEl.currentTime - onceTarget) > 0.25) {
+    audioEl.currentTime = onceTarget;
   }
 }
 

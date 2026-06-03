@@ -1,6 +1,6 @@
 # ScrollDrop
 
-Browser-based tool to place animated scrolling text over a still image background, with music and voiceover. No server, no install. Export as WebM or MP4.
+Browser-based tool to place animated scrolling text over a still image background, with music and voiceover. No server, no install. Export as MP4.
 
 ## Features
 
@@ -14,8 +14,8 @@ Browser-based tool to place animated scrolling text over a still image backgroun
 - Background fit (cover / contain / stretch), blur overlay, color overlay & vignette
 - Aspect ratios: 16:9, 9:16, 1:1, 4:3
 - Live preview with play / pause / reset
-- Export to **WebM** or **MP4** via offline frame render + ffmpeg.wasm (stable 30 fps)
-- **Save project as JSON** — all settings, text, and embedded media
+- Export to **MP4** via offline frame render + ffmpeg.wasm (stable 30 fps)
+- **Export setup (JSON)** in Settings — all controls, text, and optional embedded media
 
 ## Local development
 

@@ -791,23 +791,6 @@ input[type="color"] {
   display: none;
 }
 
-.export-format-label {
-  display: flex;
-  align-items: center;
-}
-
-.export-format-select {
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 8px 10px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  color: var(--text);
-  cursor: pointer;
-}
-
 .sr-only {
   position: absolute;
   width: 1px;

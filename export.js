@@ -448,17 +448,16 @@ function compositeFrame(
  * @param {HTMLElement} canvasEl
  * @param {import('./preview.js').ScrollPreview} engine
  * @param {object} hooks
- * @param {'webm'|'mp4'} hooks.format
  * @param {(time: number) => void | Promise<void>} [hooks.onFrame]
  */
 export async function exportRecording(canvasEl, engine, hooks = {}) {
   const {
     onProgress = () => {},
     onStatus = () => {},
-    format = "webm",
     musicEl = null,
     voiceEl = null,
     musicVolume = 100,
+    musicLoop = true,
     voiceVolume = 100,
     onFrame = () => {},
   } = hooks;
@@ -499,7 +498,6 @@ export async function exportRecording(canvasEl, engine, hooks = {}) {
     fps: FPS,
     frameCount,
     totalDuration,
-    format,
     renderFrame: async (_frameIndex, t) => {
       engine.applyTime(t);
       await onFrame(t);
@@ -510,6 +508,7 @@ export async function exportRecording(canvasEl, engine, hooks = {}) {
       musicSrc: musicEl?.src || null,
       voiceSrc: voiceEl?.src || null,
       musicVolume,
+      musicLoop,
       voiceVolume,
     },
     onProgress,
@@ -517,12 +516,7 @@ export async function exportRecording(canvasEl, engine, hooks = {}) {
   });
 }
 
-/** @deprecated Use exportRecording */
-export async function exportToWebM(canvasEl, engine, hooks) {
-  return exportRecording(canvasEl, engine, { ...hooks, format: "webm" });
-}
-
-export function downloadBlob(blob, filename = "scrolldrop-export.webm") {
+export function downloadBlob(blob, filename = "scrolldrop-export.mp4") {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

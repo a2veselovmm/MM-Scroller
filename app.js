@@ -69,6 +69,7 @@ const state = {
   vignetteRadiusY: 55,
   vignetteSoftness: 50,
   musicVolume: 100,
+  musicLoop: true,
   voiceVolume: 100,
   aspectRatio: "9/16",
   bgUrl: null,
@@ -400,16 +401,26 @@ function updateTimelineUI(current, total) {
     `Scroll duration · ${formatTime(total)}`;
 }
 
-function syncAudioTrack(el, time, volume, { isPlaying = false } = {}) {
+function syncAudioTrack(el, time, volume, { isPlaying = false, mode = "loop" } = {}) {
   if (!el?.src) return;
   const dur = el.duration;
   if (!dur || !Number.isFinite(dur)) return;
-  syncBgAudioToTimeline(el, time, dur, "loop", isPlaying, volume);
+  syncBgAudioToTimeline(el, time, dur, mode, isPlaying, volume);
 }
 
 function syncTimelineAudio(time, { isPlaying = false } = {}) {
-  syncAudioTrack(bgMusic, time, state.musicVolume, { isPlaying });
-  syncAudioTrack(bgVoice, time, state.voiceVolume, { isPlaying });
+  syncAudioTrack(bgMusic, time, state.musicVolume, {
+    isPlaying,
+    mode: state.musicLoop ? "loop" : "once",
+  });
+  syncAudioTrack(bgVoice, time, state.voiceVolume, { isPlaying, mode: "loop" });
+}
+
+function applyMusicLoop() {
+  bgMusic.loop = state.musicLoop;
+  syncTimelineAudio(engine.timelineTime, {
+    isPlaying: engine.running && !engine.paused,
+  });
 }
 
 function pauseTimelineAudio() {
@@ -439,13 +450,12 @@ function loadMusic(file) {
   bgMusicObjectUrl = url;
   $("bg-music-filename").textContent = file.name;
   bgMusic.src = url;
+  bgMusic.loop = state.musicLoop;
   bgMusic.addEventListener(
     "loadedmetadata",
     () => {
       applyMediaVolume(bgMusic, state.musicVolume);
-      syncTimelineAudio(engine.timelineTime, {
-        isPlaying: engine.running && !engine.paused,
-      });
+      applyMusicLoop();
     },
     { once: true }
   );
@@ -872,6 +882,11 @@ function initControls() {
     applyMediaVolume(bgMusic, state.musicVolume);
   });
 
+  $("music-loop").addEventListener("change", (e) => {
+    state.musicLoop = e.target.checked;
+    applyMusicLoop();
+  });
+
   bindRange("bg-voice-volume", "bg-voice-volume-val", (v) => `${v}%`, (v) => {
     state.voiceVolume = v;
     applyMediaVolume(bgVoice, state.voiceVolume);
@@ -1004,13 +1019,6 @@ function initTransport() {
     updatePlayPauseButton();
   });
 
-  $("btn-preview").addEventListener("click", () => {
-    if (isExporting) return;
-    engine.reset();
-    engine.play();
-    syncTimelineAudio(0, { isPlaying: true });
-    updatePlayPauseButton();
-  });
 }
 
 async function runExport() {
@@ -1023,8 +1031,6 @@ async function runExport() {
 
   exportBtn.disabled = true;
   btnPlayPause.disabled = true;
-  $("btn-preview").disabled = true;
-  $("btn-save-project").disabled = true;
   $("btn-export-setup").disabled = true;
   timelineScrub.disabled = true;
   progressEl.classList.remove("hidden");
@@ -1048,12 +1054,11 @@ async function runExport() {
 
     progressLabel.textContent = "Preparing export…";
 
-    const format = $("export-format").value;
     const blob = await exportRecording(canvas, engine, {
-      format,
       musicEl: bgMusic.src ? bgMusic : null,
       voiceEl: bgVoice.src ? bgVoice : null,
       musicVolume: state.musicVolume,
+      musicLoop: state.musicLoop,
       voiceVolume: state.voiceVolume,
       onFrame: async (t) => {
         if (state.glowEnabled && textGlowBack) {
@@ -1069,10 +1074,7 @@ async function runExport() {
       },
     });
 
-    downloadBlob(
-      blob,
-      format === "mp4" ? "scrolldrop-export.mp4" : "scrolldrop-export.webm"
-    );
+    downloadBlob(blob, "scrolldrop-export.mp4");
     progressLabel.textContent = "Export complete — download started";
     playbackStatus.textContent = "Export complete";
     pauseTimelineAudio();
@@ -1086,8 +1088,6 @@ async function runExport() {
     isExporting = false;
     exportBtn.disabled = false;
     btnPlayPause.disabled = false;
-    $("btn-preview").disabled = false;
-    $("btn-save-project").disabled = false;
     $("btn-export-setup").disabled = false;
     timelineScrub.disabled = false;
     canvas.classList.remove("is-recording");
@@ -1127,7 +1127,6 @@ function serializeUiState() {
   });
   const panelW = appMain.style.getPropertyValue("--panel-w");
   return {
-    exportFormat: $("export-format").value,
     activeTab: localStorage.getItem("scrolldrop-active-tab") || "text",
     collapsibles,
     panelWidth: panelW || localStorage.getItem("scrolldrop-panel-w") || null,
@@ -1210,11 +1209,7 @@ async function exportSetupJson(options = {}) {
     filenamePrefix = "scrolldrop-setup",
   } = options;
 
-  const buttons = [
-    triggerBtn,
-    $("btn-save-project"),
-    $("btn-export-setup"),
-  ].filter(Boolean);
+  const buttons = [triggerBtn, $("btn-export-setup")].filter(Boolean);
 
   const prevLabels = new Map();
   buttons.forEach((btn) => {
@@ -1251,19 +1246,8 @@ async function exportSetupJson(options = {}) {
   }
 }
 
-async function saveProjectJson() {
-  await exportSetupJson({
-    embedMedia: true,
-    triggerBtn: $("btn-save-project"),
-    savingLabel: "Saving…",
-    doneStatus: "Project saved as JSON",
-    filenamePrefix: "scrolldrop-project",
-  });
-}
-
 function initExport() {
   $("btn-export").addEventListener("click", runExport);
-  $("btn-save-project").addEventListener("click", saveProjectJson);
   $("btn-export-setup").addEventListener("click", () => {
     const embedMedia = $("export-setup-embed-media").checked;
     exportSetupJson({
@@ -1347,6 +1331,8 @@ function init() {
   initPanelResize();
   applyMediaVolume(bgMusic, state.musicVolume);
   applyMediaVolume(bgVoice, state.voiceVolume);
+  $("music-loop").checked = state.musicLoop;
+  bgMusic.loop = state.musicLoop;
   initTimeline();
   initTransport();
   initExport();

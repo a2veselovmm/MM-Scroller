@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ScrollDrop — Scrolling Text Over Any Background</title>
-  <meta name="description" content="Place animated scrolling text over a still image with music and voiceover. Export as WebM or MP4 — no install, no server." />
+  <meta name="description" content="Place animated scrolling text over a still image with music and voiceover. Export as MP4 — no install, no server." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -17,16 +17,7 @@
       <h1>ScrollDrop</h1>
     </div>
     <div class="header-actions">
-      <button type="button" id="btn-preview" class="btn btn-secondary">Preview</button>
-      <button type="button" id="btn-save-project" class="btn btn-secondary">Save JSON</button>
-      <label class="export-format-label">
-        <span class="sr-only">Export format</span>
-        <select id="export-format" class="export-format-select" aria-label="Export format">
-          <option value="webm">WebM</option>
-          <option value="mp4">MP4</option>
-        </select>
-      </label>
-      <button type="button" id="btn-export" class="btn btn-primary">Export</button>
+      <button type="button" id="btn-export" class="btn btn-primary">Export MP4</button>
     </div>
   </header>
 
@@ -320,6 +311,11 @@
           Music volume <span id="bg-music-volume-val" class="value-badge">100%</span>
         </label>
         <input type="range" id="bg-music-volume" min="0" max="100" value="100" />
+        <label class="control-label checkbox-row">
+          <input type="checkbox" id="music-loop" checked />
+          Loop music
+        </label>
+        <p class="hint">When enabled, music repeats for the full scroll. Off plays the track once.</p>
         </div>
       </details>
 
