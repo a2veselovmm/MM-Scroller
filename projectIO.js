@@ -1,5 +1,5 @@
 /**
- * Serialize / download ScrollDrop project state as JSON.
+ * Serialize / download MM-Scroller project state as JSON.
  */
 
 export const PROJECT_FORMAT_VERSION = 1;
@@ -44,7 +44,7 @@ export async function buildProjectDocument(payload) {
     scrolldrop: {
       version: PROJECT_FORMAT_VERSION,
       exportedAt: new Date().toISOString(),
-      app: "ScrollDrop",
+      app: "MM-Scroller",
       exportKind: "setup",
       embedMedia,
     },

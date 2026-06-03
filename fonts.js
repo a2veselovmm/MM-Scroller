@@ -1,4 +1,4 @@
-/** Curated Google Fonts for ScrollDrop */
+/** Curated Google Fonts for MM-Scroller */
 export const CURATED_FONTS = [
   { name: "Inter", family: "Inter", weights: "400;600;700", category: "sans" },
   { name: "Roboto", family: "Roboto", weights: "400;700", category: "sans" },

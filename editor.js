@@ -375,7 +375,7 @@ export function plainToHtml(text) {
 /** Demo document */
 export function defaultEditorHtml() {
   return `
-<div class="text-line"><span class="text-run" style="color:#FFD700;font-size:48px;font-weight:700">ScrollDrop</span></div>
+<div class="text-line"><span class="text-run" style="color:#FFD700;font-size:48px;font-weight:700">MM-Scroller</span></div>
 <div class="text-line">Line one of your credits</div>
 <div class="text-line"><span class="text-run" style="color:#a8d8ff;font-size:40px">Line two — styled separately</span></div>
 <div class="text-line">Line three — cinematic feel</div>

@@ -1,4 +1,4 @@
-# ScrollDrop
+# MM-Scroller
 
 Browser-based tool to place animated scrolling text over a still image background, with music and voiceover. No server, no install. Export as MP4.
 
