@@ -32,8 +32,18 @@
 
   <main class="app-main" id="app-main">
     <aside class="controls-panel" id="controls-panel" aria-label="Controls">
-      <section class="control-section">
-        <h2>Text</h2>
+      <div class="control-tabs" role="tablist" aria-label="Control groups">
+        <button type="button" class="control-tab is-active" role="tab" id="control-tab-text" data-tab="text" aria-selected="true" aria-controls="tab-panel-text" tabindex="0">Text</button>
+        <button type="button" class="control-tab" role="tab" id="control-tab-background" data-tab="background" aria-selected="false" aria-controls="tab-panel-background" tabindex="-1">Background</button>
+        <button type="button" class="control-tab" role="tab" id="control-tab-audio" data-tab="audio" aria-selected="false" aria-controls="tab-panel-audio" tabindex="-1">Audio</button>
+        <button type="button" class="control-tab" role="tab" id="control-tab-settings" data-tab="settings" aria-selected="false" aria-controls="tab-panel-settings" tabindex="-1">Settings</button>
+      </div>
+
+      <div class="control-tab-panels">
+      <div id="tab-panel-text" class="control-tab-panel is-active" role="tabpanel" aria-labelledby="control-tab-text">
+      <details class="collapsible" id="collapsible-text-content" open>
+        <summary class="collapsible-summary">Content</summary>
+        <div class="collapsible-body">
         <div class="view-toggle-block">
           <span class="view-toggle-title">View</span>
           <div class="view-toggle" role="group" aria-label="Text view mode">
@@ -71,10 +81,12 @@
             placeholder="Type or paste text here. One line per row; blank lines add spacing."
           ></textarea>
         </div>
-      </section>
+        </div>
+      </details>
 
-      <section class="control-section">
-        <h2>Style</h2>
+      <details class="collapsible" id="collapsible-style" open>
+        <summary class="collapsible-summary">Style</summary>
+        <div class="collapsible-body">
         <p class="hint" id="style-target-hint">Adjusts selected text, or defaults for new typing</p>
 
         <label class="control-label" for="font-picker">Font</label>
@@ -118,8 +130,8 @@
           </label>
           <input type="range" id="stroke-width" min="0.5" max="12" step="0.5" value="2" />
         </div>
-
-      </section>
+        </div>
+      </details>
 
       <details class="collapsible" id="collapsible-global" open>
         <summary class="collapsible-summary">Layout &amp; scroll</summary>
@@ -218,9 +230,12 @@
         </div>
         </div>
       </details>
+      </div>
 
-      <section class="control-section">
-        <h2>Background</h2>
+      <div id="tab-panel-background" class="control-tab-panel" role="tabpanel" aria-labelledby="control-tab-background" hidden>
+      <details class="collapsible" id="collapsible-bg-image" open>
+        <summary class="collapsible-summary">Image</summary>
+        <div class="collapsible-body">
         <label class="control-label file-upload">
           <span class="btn btn-secondary btn-block">Upload background image</span>
           <input type="file" id="bg-upload" accept="image/jpeg,image/png,image/webp" hidden />
@@ -233,17 +248,69 @@
           <option value="contain">Contain</option>
           <option value="fill">Stretch</option>
         </select>
+        </div>
+      </details>
 
-        <label class="control-label" for="brightness">
-          Brightness <span id="brightness-val" class="value-badge">100%</span>
-        </label>
-        <input type="range" id="brightness" min="20" max="100" value="100" />
-
+      <details class="collapsible" id="collapsible-bg-effects">
+        <summary class="collapsible-summary">Background effects</summary>
+        <div class="collapsible-body">
+        <h3 class="control-subhead">Blur overlay</h3>
         <label class="control-label" for="blur">
-          Blur overlay <span id="blur-val" class="value-badge">0px</span>
+          Blur <span id="blur-val" class="value-badge">0px</span>
         </label>
         <input type="range" id="blur" min="0" max="24" value="0" />
+        <p class="hint">Blurs the image and effects below the text.</p>
 
+        <h3 class="control-subhead">Overlay</h3>
+        <label class="control-label checkbox-row">
+          <input type="checkbox" id="color-overlay-enabled" />
+          Enable color overlay
+        </label>
+        <p class="hint">Solid tint above the image, below text.</p>
+        <div id="color-overlay-controls" class="effect-controls is-disabled">
+          <div class="control-row">
+            <label class="control-label" for="color-overlay-color">Color</label>
+            <input type="color" id="color-overlay-color" value="#000000" />
+            <label class="control-label inline" for="color-overlay-opacity">
+              Opacity <span id="color-overlay-opacity-val" class="value-badge">40%</span>
+            </label>
+            <input type="range" id="color-overlay-opacity" min="0" max="100" value="40" />
+          </div>
+        </div>
+
+        <h3 class="control-subhead">Vignette</h3>
+        <label class="control-label checkbox-row">
+          <input type="checkbox" id="vignette-enabled" />
+          Enable vignette
+        </label>
+        <p class="hint">Darkens edges between the image and text.</p>
+        <div id="vignette-controls" class="effect-controls is-disabled">
+          <div class="control-row">
+            <label class="control-label" for="vignette-color">Color</label>
+            <input type="color" id="vignette-color" value="#000000" />
+          </div>
+          <label class="control-label" for="vignette-radius-x">
+            Radius X <span id="vignette-radius-x-val" class="value-badge">55</span>
+          </label>
+          <input type="range" id="vignette-radius-x" min="5" max="100" value="55" />
+          <label class="control-label" for="vignette-radius-y">
+            Radius Y <span id="vignette-radius-y-val" class="value-badge">55</span>
+          </label>
+          <input type="range" id="vignette-radius-y" min="5" max="100" value="55" />
+          <p class="hint">Ellipse size (% of canvas width and height).</p>
+          <label class="control-label" for="vignette-softness">
+            Softness <span id="vignette-softness-val" class="value-badge">50</span>
+          </label>
+          <input type="range" id="vignette-softness" min="0" max="100" value="50" />
+        </div>
+        </div>
+      </details>
+      </div>
+
+      <div id="tab-panel-audio" class="control-tab-panel" role="tabpanel" aria-labelledby="control-tab-audio" hidden>
+      <details class="collapsible" id="collapsible-audio-music" open>
+        <summary class="collapsible-summary">Music</summary>
+        <div class="collapsible-body">
         <label class="control-label file-upload">
           <span class="btn btn-secondary btn-block">Upload music (MP3, WAV)</span>
           <input type="file" id="bg-music-upload" accept="audio/mpeg,audio/wav,audio/mp3,.mp3,.wav" hidden />
@@ -253,7 +320,12 @@
           Music volume <span id="bg-music-volume-val" class="value-badge">100%</span>
         </label>
         <input type="range" id="bg-music-volume" min="0" max="100" value="100" />
+        </div>
+      </details>
 
+      <details class="collapsible" id="collapsible-audio-voice" open>
+        <summary class="collapsible-summary">Voiceover</summary>
+        <div class="collapsible-body">
         <label class="control-label file-upload">
           <span class="btn btn-secondary btn-block">Upload voiceover (MP3, WAV)</span>
           <input type="file" id="bg-voice-upload" accept="audio/mpeg,audio/wav,audio/mp3,.mp3,.wav" hidden />
@@ -263,10 +335,14 @@
           Voiceover volume <span id="bg-voice-volume-val" class="value-badge">100%</span>
         </label>
         <input type="range" id="bg-voice-volume" min="0" max="100" value="100" />
-      </section>
+        </div>
+      </details>
+      </div>
 
-      <section class="control-section">
-        <h2>Canvas</h2>
+      <div id="tab-panel-settings" class="control-tab-panel" role="tabpanel" aria-labelledby="control-tab-settings" hidden>
+      <details class="collapsible" id="collapsible-settings-canvas" open>
+        <summary class="collapsible-summary">Canvas</summary>
+        <div class="collapsible-body">
         <label class="control-label" for="aspect-ratio">Aspect ratio</label>
         <select id="aspect-ratio">
           <option value="16/9">16:9 Landscape</option>
@@ -274,7 +350,26 @@
           <option value="1/1">1:1 Square</option>
           <option value="4/3">4:3</option>
         </select>
-      </section>
+        </div>
+      </details>
+
+      <details class="collapsible" id="collapsible-settings-export" open>
+        <summary class="collapsible-summary">Export setup</summary>
+        <div class="collapsible-body">
+        <p class="hint">
+          Saves every control value, text content, timeline position, and UI state as JSON. Use the same file to restore your setup later.
+        </p>
+        <label class="control-label checkbox-row">
+          <input type="checkbox" id="export-setup-embed-media" checked />
+          Embed background, music, and voiceover (larger file)
+        </label>
+        <button type="button" id="btn-export-setup" class="btn btn-secondary btn-block">
+          Export setup (JSON)
+        </button>
+        </div>
+      </details>
+      </div>
+      </div>
     </aside>
 
     <div class="panel-resizer" id="panel-resizer" role="separator" aria-orientation="vertical" aria-label="Resize side panel" tabindex="0"></div>
@@ -290,6 +385,8 @@
             <audio id="bg-music" class="hidden" preload="auto"></audio>
             <audio id="bg-voice" class="hidden" preload="auto"></audio>
           </div>
+          <div class="bg-vignette-layer hidden" id="bg-vignette-layer" aria-hidden="true"></div>
+          <div class="bg-color-overlay hidden" id="bg-color-overlay" aria-hidden="true"></div>
           <div class="overlay-layer" id="overlay-layer"></div>
           <div class="text-scroll-container" id="text-scroll-container">
             <div id="text-glow-back" class="text-glow-back hidden" aria-hidden="true"></div>

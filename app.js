@@ -1,5 +1,6 @@
 import { initFontPicker } from "./fonts.js";
 import { ScrollPreview } from "./preview.js";
+import { applyBgEffectsToDom } from "./backgroundEffects.js";
 import { exportRecording, downloadBlob } from "./export.js";
 import {
   buildProjectDocument,
@@ -58,8 +59,15 @@ const state = {
   startDelay: 0,
   scrollStartY: null,
   fitMode: "cover",
-  brightness: 100,
   blur: 0,
+  colorOverlayEnabled: false,
+  colorOverlayColor: "#000000",
+  colorOverlayOpacity: 40,
+  vignetteEnabled: false,
+  vignetteColor: "#000000",
+  vignetteRadiusX: 55,
+  vignetteRadiusY: 55,
+  vignetteSoftness: 50,
   musicVolume: 100,
   voiceVolume: 100,
   aspectRatio: "9/16",
@@ -91,6 +99,8 @@ const bgPlaceholder = $("bg-placeholder");
 let bgMusicObjectUrl = null;
 let bgVoiceObjectUrl = null;
 const overlayLayer = $("overlay-layer");
+const bgVignetteLayer = $("bg-vignette-layer");
+const bgColorOverlay = $("bg-color-overlay");
 const playbackStatus = $("playback-status");
 const timelineScrub = $("timeline-scrub");
 const timeCurrent = $("time-current");
@@ -501,17 +511,31 @@ function bindRange(id, valId, format, onChange) {
   update();
 }
 
+function applyBgEffects() {
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  applyBgEffectsToDom(bgVignetteLayer, bgColorOverlay, w, h, {
+    vignetteEnabled: state.vignetteEnabled,
+    vignetteColor: state.vignetteColor,
+    vignetteRadiusX: state.vignetteRadiusX,
+    vignetteRadiusY: state.vignetteRadiusY,
+    vignetteSoftness: state.vignetteSoftness,
+    colorOverlayEnabled: state.colorOverlayEnabled,
+    colorOverlayColor: state.colorOverlayColor,
+    colorOverlayOpacity: state.colorOverlayOpacity,
+  });
+}
+
 function applyBackground() {
   const fit = state.fitMode;
   bgImage.dataset.fit = fit;
   bgImage.style.objectFit = fit === "fill" ? "fill" : fit;
 
-  overlayLayer.dataset.brightness = String(state.brightness);
   overlayLayer.dataset.blur = String(state.blur);
-
-  const darken = 1 - state.brightness / 100;
-  overlayLayer.style.background = darken > 0 ? `rgba(0,0,0,${darken})` : "transparent";
+  overlayLayer.style.background = "transparent";
   overlayLayer.style.backdropFilter = state.blur > 0 ? `blur(${state.blur}px)` : "none";
+
+  applyBgEffects();
 }
 
 function setAspectRatio(ratio) {
@@ -796,14 +820,51 @@ function initControls() {
     applyBackground();
   });
 
-  bindRange("brightness", "brightness-val", (v) => `${v}%`, (v) => {
-    state.brightness = v;
-    applyBackground();
-  });
-
   bindRange("blur", "blur-val", (v) => `${v}px`, (v) => {
     state.blur = v;
     applyBackground();
+  });
+
+  $("color-overlay-enabled").addEventListener("change", (e) => {
+    state.colorOverlayEnabled = e.target.checked;
+    setEffectPanelEnabled("color-overlay-controls", state.colorOverlayEnabled);
+    applyBgEffects();
+  });
+
+  $("color-overlay-color").addEventListener("input", (e) => {
+    state.colorOverlayColor = e.target.value;
+    applyBgEffects();
+  });
+
+  bindRange("color-overlay-opacity", "color-overlay-opacity-val", (v) => `${v}%`, (v) => {
+    state.colorOverlayOpacity = v;
+    applyBgEffects();
+  });
+
+  $("vignette-enabled").addEventListener("change", (e) => {
+    state.vignetteEnabled = e.target.checked;
+    setEffectPanelEnabled("vignette-controls", state.vignetteEnabled);
+    applyBgEffects();
+  });
+
+  $("vignette-color").addEventListener("input", (e) => {
+    state.vignetteColor = e.target.value;
+    applyBgEffects();
+  });
+
+  bindRange("vignette-radius-x", "vignette-radius-x-val", (v) => String(Math.round(v)), (v) => {
+    state.vignetteRadiusX = v;
+    applyBgEffects();
+  });
+
+  bindRange("vignette-radius-y", "vignette-radius-y-val", (v) => String(Math.round(v)), (v) => {
+    state.vignetteRadiusY = v;
+    applyBgEffects();
+  });
+
+  bindRange("vignette-softness", "vignette-softness-val", (v) => String(Math.round(v)), (v) => {
+    state.vignetteSoftness = v;
+    applyBgEffects();
   });
 
   bindRange("bg-music-volume", "bg-music-volume-val", (v) => `${v}%`, (v) => {
@@ -829,7 +890,10 @@ function initControls() {
   $("aspect-ratio").addEventListener("change", (e) => {
     state.aspectRatio = e.target.value;
     setAspectRatio(state.aspectRatio);
-    requestAnimationFrame(() => remeasureAndApply());
+    requestAnimationFrame(() => {
+      remeasureAndApply();
+      applyBgEffects();
+    });
   });
 
   $("bg-upload").addEventListener("change", (e) => {
@@ -961,6 +1025,7 @@ async function runExport() {
   btnPlayPause.disabled = true;
   $("btn-preview").disabled = true;
   $("btn-save-project").disabled = true;
+  $("btn-export-setup").disabled = true;
   timelineScrub.disabled = true;
   progressEl.classList.remove("hidden");
   canvas.classList.add("is-recording");
@@ -1023,6 +1088,7 @@ async function runExport() {
     btnPlayPause.disabled = false;
     $("btn-preview").disabled = false;
     $("btn-save-project").disabled = false;
+    $("btn-export-setup").disabled = false;
     timelineScrub.disabled = false;
     canvas.classList.remove("is-recording");
     setTimeout(() => progressEl.classList.add("hidden"), 3000);
@@ -1034,6 +1100,57 @@ function serializeSettings() {
   return {
     ...settings,
     scrollStartY: state.scrollStartY,
+  };
+}
+
+function serializeTextState() {
+  return {
+    editMode: state.editMode,
+    styledHtml: lastStyledHtml || textEditor.innerHTML,
+    plainText: textPlain.value,
+  };
+}
+
+function serializeTimelineState() {
+  return {
+    position: engine.timelineTime,
+    speed: engine.speed,
+    startDelay: engine.startDelay,
+    scrollStartY: engine.scrollStartY,
+  };
+}
+
+function serializeUiState() {
+  const collapsibles = {};
+  document.querySelectorAll(".collapsible").forEach((el) => {
+    if (el.id) collapsibles[el.id] = el.open;
+  });
+  const panelW = appMain.style.getPropertyValue("--panel-w");
+  return {
+    exportFormat: $("export-format").value,
+    activeTab: localStorage.getItem("scrolldrop-active-tab") || "text",
+    collapsibles,
+    panelWidth: panelW || localStorage.getItem("scrolldrop-panel-w") || null,
+  };
+}
+
+function collectProjectMediaRefs() {
+  const bgName = cleanBgFileName($("bg-filename").textContent);
+  const musicName = $("bg-music-filename").textContent;
+  const voiceName = $("bg-voice-filename").textContent;
+
+  return {
+    background: state.hasBackgroundImage && bgName
+      ? { type: "image", fileName: bgName }
+      : null,
+    music:
+      bgMusic.src && !musicName.startsWith("No music")
+        ? { type: "music", fileName: musicName }
+        : null,
+    voiceover:
+      bgVoice.src && !voiceName.startsWith("No voiceover")
+        ? { type: "voiceover", fileName: voiceName }
+        : null,
   };
 }
 
@@ -1067,62 +1184,96 @@ async function collectProjectMedia() {
   return { background, music, voiceover };
 }
 
-async function saveProjectJson() {
+async function buildSetupDocument(embedMedia) {
+  syncFromEditor();
+  const media = embedMedia
+    ? await collectProjectMedia()
+    : collectProjectMediaRefs();
+  return buildProjectDocument({
+    settings: serializeSettings(),
+    text: serializeTextState(),
+    media,
+    timeline: serializeTimelineState(),
+    ui: serializeUiState(),
+    embedMedia,
+  });
+}
+
+async function exportSetupJson(options = {}) {
   if (isExporting) return;
 
-  const btn = $("btn-save-project");
-  btn.disabled = true;
-  const prevLabel = btn.textContent;
-  btn.textContent = "Saving…";
+  const {
+    embedMedia = true,
+    triggerBtn = null,
+    savingLabel = "Exporting…",
+    doneStatus = "Setup exported as JSON",
+    filenamePrefix = "scrolldrop-setup",
+  } = options;
+
+  const buttons = [
+    triggerBtn,
+    $("btn-save-project"),
+    $("btn-export-setup"),
+  ].filter(Boolean);
+
+  const prevLabels = new Map();
+  buttons.forEach((btn) => {
+    prevLabels.set(btn, btn.textContent);
+    btn.disabled = true;
+    if (btn === triggerBtn) btn.textContent = savingLabel;
+  });
 
   try {
-    syncFromEditor();
-
-    const media = await collectProjectMedia();
-    const doc = await buildProjectDocument({
-      settings: serializeSettings(),
-      text: {
-        editMode: state.editMode,
-        styledHtml: lastStyledHtml || textEditor.innerHTML,
-        plainText: textPlain.value,
-      },
-      media,
-      timeline: {
-        position: engine.timelineTime,
-        speed: engine.speed,
-        startDelay: engine.startDelay,
-        scrollStartY: engine.scrollStartY,
-      },
-      ui: {
-        exportFormat: $("export-format").value,
-      },
-    });
+    const doc = await buildSetupDocument(embedMedia);
 
     const bytes = estimateProjectSize(doc);
-    if (bytes > 25 * 1024 * 1024) {
+    if (embedMedia && bytes > 25 * 1024 * 1024) {
       const mb = (bytes / (1024 * 1024)).toFixed(1);
       const ok = confirm(
-        `This project file will be about ${mb} MB (media is embedded). Save anyway?`
+        `This setup file will be about ${mb} MB (media is embedded). Export anyway?`
       );
       if (!ok) return;
     }
 
     const stamp = new Date().toISOString().slice(0, 10);
-    downloadProjectJson(doc, `scrolldrop-project-${stamp}.json`);
-    playbackStatus.textContent = "Project saved as JSON";
+    downloadProjectJson(doc, `${filenamePrefix}-${stamp}.json`);
+    playbackStatus.textContent = doneStatus;
   } catch (err) {
     console.error(err);
-    alert(`Could not save project: ${err.message}`);
-    playbackStatus.textContent = "Project save failed";
+    alert(`Could not export setup: ${err.message}`);
+    playbackStatus.textContent = "Setup export failed";
   } finally {
-    btn.disabled = false;
-    btn.textContent = prevLabel;
+    buttons.forEach((btn) => {
+      btn.disabled = false;
+      const prev = prevLabels.get(btn);
+      if (prev != null) btn.textContent = prev;
+    });
   }
+}
+
+async function saveProjectJson() {
+  await exportSetupJson({
+    embedMedia: true,
+    triggerBtn: $("btn-save-project"),
+    savingLabel: "Saving…",
+    doneStatus: "Project saved as JSON",
+    filenamePrefix: "scrolldrop-project",
+  });
 }
 
 function initExport() {
   $("btn-export").addEventListener("click", runExport);
   $("btn-save-project").addEventListener("click", saveProjectJson);
+  $("btn-export-setup").addEventListener("click", () => {
+    const embedMedia = $("export-setup-embed-media").checked;
+    exportSetupJson({
+      embedMedia,
+      triggerBtn: $("btn-export-setup"),
+      savingLabel: "Exporting…",
+      doneStatus: "Setup exported as JSON",
+      filenamePrefix: "scrolldrop-setup",
+    });
+  });
 }
 
 function initCollapsibles() {
@@ -1138,10 +1289,60 @@ function initCollapsibles() {
   });
 }
 
+const CONTROL_TAB_IDS = ["text", "background", "audio", "settings"];
+
+function initControlTabs() {
+  const tabs = document.querySelectorAll(".control-tab");
+  const panels = document.querySelectorAll(".control-tab-panel");
+  const storageKey = "scrolldrop-active-tab";
+
+  const activate = (tabId) => {
+    if (!CONTROL_TAB_IDS.includes(tabId)) tabId = "text";
+
+    tabs.forEach((tab) => {
+      const on = tab.dataset.tab === tabId;
+      tab.classList.toggle("is-active", on);
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+      tab.tabIndex = on ? 0 : -1;
+    });
+
+    panels.forEach((panel) => {
+      const on = panel.id === `tab-panel-${tabId}`;
+      panel.classList.toggle("is-active", on);
+      panel.hidden = !on;
+    });
+
+    localStorage.setItem(storageKey, tabId);
+  };
+
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => activate(tab.dataset.tab));
+    tab.addEventListener("keydown", (e) => {
+      const idx = CONTROL_TAB_IDS.indexOf(tab.dataset.tab);
+      if (idx < 0) return;
+      let next = idx;
+      if (e.key === "ArrowRight") next = (idx + 1) % CONTROL_TAB_IDS.length;
+      else if (e.key === "ArrowLeft") {
+        next = (idx - 1 + CONTROL_TAB_IDS.length) % CONTROL_TAB_IDS.length;
+      } else return;
+      e.preventDefault();
+      const target = document.querySelector(
+        `.control-tab[data-tab="${CONTROL_TAB_IDS[next]}"]`
+      );
+      target?.click();
+      target?.focus();
+    });
+  });
+
+  const saved = localStorage.getItem(storageKey);
+  activate(CONTROL_TAB_IDS.includes(saved) ? saved : "text");
+}
+
 function init() {
   initEditor();
   initAlignButtons();
   initControls();
+  initControlTabs();
   initCollapsibles();
   initPanelResize();
   applyMediaVolume(bgMusic, state.musicVolume);
@@ -1163,8 +1364,13 @@ function init() {
   setEffectPanelEnabled("stroke-controls", state.strokeEnabled);
   setEffectPanelEnabled("shadow-controls", state.shadowEnabled);
   setEffectPanelEnabled("glow-controls", state.glowEnabled);
+  setEffectPanelEnabled("color-overlay-controls", state.colorOverlayEnabled);
+  setEffectPanelEnabled("vignette-controls", state.vignetteEnabled);
 
-  window.addEventListener("resize", () => remeasureAndApply());
+  window.addEventListener("resize", () => {
+    remeasureAndApply();
+    applyBgEffects();
+  });
 }
 
 init();

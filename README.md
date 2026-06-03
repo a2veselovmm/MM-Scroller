@@ -11,7 +11,7 @@ Browser-based tool to place animated scrolling text over a still image backgroun
 - Font picker (32 curated Google Fonts), size, color, opacity, alignment
 - Line height, letter spacing, text shadow, horizontal padding
 - Scroll speed (10–500 px/s) and start delay
-- Background fit (cover / contain / stretch), brightness & blur overlay
+- Background fit (cover / contain / stretch), blur overlay, color overlay & vignette
 - Aspect ratios: 16:9, 9:16, 1:1, 4:3
 - Live preview with play / pause / reset
 - Export to **WebM** or **MP4** via offline frame render + ffmpeg.wasm (stable 30 fps)

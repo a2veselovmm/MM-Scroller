@@ -3,6 +3,11 @@
  * @see https://www.remotion.dev/docs/ai/skills
  */
 
+import {
+  drawColorOverlay,
+  drawVignette,
+  readBgEffectsFromCanvas,
+} from "./backgroundEffects.js";
 import { encodeFrameSequence } from "./frameEncoder.js";
 import { buildGlowShadowStack } from "./textEffects.js";
 
@@ -277,7 +282,6 @@ function canvasToJpegBlob(canvas, quality = 0.78) {
 function drawBackgroundLayer(ctx, canvasEl, w, h) {
   const bgImg = canvasEl.querySelector("#bg-image:not(.hidden)");
   const placeholder = canvasEl.querySelector("#bg-placeholder:not(.hidden)");
-  const overlay = canvasEl.querySelector("#overlay-layer");
 
   ctx.fillStyle = "#111118";
   ctx.fillRect(0, 0, w, h);
@@ -329,12 +333,6 @@ function drawBackgroundLayer(ctx, canvasEl, w, h) {
     ctx.fillRect(0, 0, w, h);
   }
 
-  const brightness = parseInt(overlay?.dataset.brightness ?? "100", 10);
-  const darken = 1 - brightness / 100;
-  if (darken > 0) {
-    ctx.fillStyle = `rgba(0,0,0,${darken})`;
-    ctx.fillRect(0, 0, w, h);
-  }
 }
 
 function buildBackgroundCache(canvasEl, w, h, ew, eh, drawScale) {
@@ -343,6 +341,10 @@ function buildBackgroundCache(canvasEl, w, h, ew, eh, drawScale) {
   scratch.height = h;
   const sctx = scratch.getContext("2d");
   drawBackgroundLayer(sctx, canvasEl, w, h);
+
+  const bgEffects = readBgEffectsFromCanvas(canvasEl);
+  drawVignette(sctx, w, h, bgEffects);
+  drawColorOverlay(sctx, w, h, bgEffects);
 
   const overlay = canvasEl.querySelector("#overlay-layer");
   const bgBlur = parseFloat(overlay?.dataset.blur ?? "0");

@@ -39,11 +39,14 @@ function cleanBgFileName(label) {
  * @returns {Promise<object>}
  */
 export async function buildProjectDocument(payload) {
+  const embedMedia = payload.embedMedia !== false;
   return {
     scrolldrop: {
       version: PROJECT_FORMAT_VERSION,
       exportedAt: new Date().toISOString(),
       app: "ScrollDrop",
+      exportKind: "setup",
+      embedMedia,
     },
     settings: payload.settings,
     text: payload.text,
