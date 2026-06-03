@@ -1,22 +1,21 @@
 # ScrollDrop
 
-Browser-based tool to place animated scrolling text over any background — image, GIF, or video. No server, no install. Export as WebM or MP4.
+Browser-based tool to place animated scrolling text over a still image background, with music and voiceover. No server, no install. Export as WebM or MP4.
 
 ## Features
 
 - Multi-line text with blank-line spacers
-- Background upload (JPG, PNG, WebP, GIF, MP4, WebM)
-- Background audio upload (MP3, WAV) with volume control
-- Video volume control when using a video background
+- **Still image** background (JPG, PNG, WebP)
+- **Music** upload (MP3, WAV) with volume control
+- **Voiceover** upload (MP3, WAV) with volume control
 - Font picker (32 curated Google Fonts), size, color, opacity, alignment
 - Line height, letter spacing, text shadow, horizontal padding
 - Scroll speed (10–500 px/s) and start delay
 - Background fit (cover / contain / stretch), brightness & blur overlay
-- Loop / play-once when scroll is longer than the clip
 - Aspect ratios: 16:9, 9:16, 1:1, 4:3
 - Live preview with play / pause / reset
 - Export to **WebM** or **MP4** via offline frame render + ffmpeg.wasm (stable 30 fps)
-- **Save project as JSON** — all settings, text, and embedded background/audio media
+- **Save project as JSON** — all settings, text, and embedded media
 
 ## Local development
 
@@ -33,7 +32,7 @@ Open `http://localhost:8080` (or the port shown). ES modules require HTTP — `f
 ## Deploy to Vercel
 
 1. Push this repo to GitHub.
-2. In the [Vercel dashboard](https://vercel.com), import the project under **anton.veselov@maneuvermarketing.com**.
+2. In the [Vercel dashboard](https://vercel.com), import the project.
 3. Framework preset: **Other** (static site, no build).
 4. Root directory: `.` — output is the repo root (`index.html` at top level).
 
@@ -54,9 +53,8 @@ vercel --prod
 ├── export.js           # Frame capture + export orchestration
 ├── frameEncoder.js     # ffmpeg.wasm frame sequence → WebM/MP4
 ├── projectIO.js        # Save project JSON
-├── mp4Export.js        # Legacy WebM→MP4 transcode helper
-├── audioSync.js        # Preview & export audio routing
-├── backgroundMedia.js  # GIF timeline + media time mapping
+├── audioSync.js        # Preview audio routing
+├── backgroundMedia.js  # Audio timeline helpers
 └── fonts.js            # Google Fonts loader
 ```
 
@@ -64,8 +62,7 @@ vercel --prod
 
 - Best export experience: **Chrome** or **Edge**
 - MP4 export downloads ffmpeg.wasm on first use (~25 MB); needs COOP/COEP headers (`vercel.json` included for Vercel deploys)
-- Export renders each frame at a fixed timeline position (same idea as [Remotion](https://www.remotion.dev/docs/ai/skills) `useCurrentFrame()`), then encodes at 30 fps — not realtime screen recording
-- Optional: `npx skills add remotion-dev/skills` for Remotion project conventions when extending this app
+- Export renders each frame at a fixed timeline position, then encodes at 30 fps
 
 ## License
 

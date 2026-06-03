@@ -97,7 +97,7 @@ function findStyledSpan(node) {
   return null;
 }
 
-function collectCharBoxes(textRoot, containerRect) {
+function collectCharBoxes(textRoot, originRect) {
   const boxes = [];
   const range = document.createRange();
   const walker = document.createTreeWalker(textRoot, NodeFilter.SHOW_TEXT);
@@ -115,8 +115,8 @@ function collectCharBoxes(textRoot, containerRect) {
         node,
         index: i,
         char: node.textContent[i],
-        x: r.left - containerRect.left,
-        y: r.top - containerRect.top,
+        x: r.left - originRect.left,
+        y: r.top - originRect.top,
         top: r.top,
         left: r.left,
         width: r.width,
@@ -200,19 +200,11 @@ function drawGlowSegment(ctx, seg, x, y, options) {
 }
 
 /** Draw text exactly where the browser laid it out (wrap, padding, alignment). */
-function drawTextFromDomLayout(
-  ctx,
-  textContent,
-  textContainer,
-  canvasW,
-  canvasH,
-  options = {}
-) {
+function drawTextFromDomLayout(ctx, textContent, originRect, canvasW, canvasH, options = {}) {
   const rootStyle = getComputedStyle(textContent);
   const padL = parseFloat(rootStyle.paddingLeft) || 0;
   const padR = parseFloat(rootStyle.paddingRight) || 0;
-  const containerRect = textContainer.getBoundingClientRect();
-  const boxes = collectCharBoxes(textContent, containerRect);
+  const boxes = collectCharBoxes(textContent, originRect);
   const runs = mergeCharBoxes(boxes, rootStyle);
   const glowMode = options.mode === "glow";
 
@@ -259,19 +251,6 @@ function flushLayout(el) {
   void el.offsetHeight;
 }
 
-/** Match preview: top edge of #text-content inside the scroll container (px). */
-function measureTextTopInContainer(textEl, container) {
-  const cr = container.getBoundingClientRect();
-  const tr = textEl.getBoundingClientRect();
-  return tr.top - cr.top;
-}
-
-function scrollYAtTime(metrics, t) {
-  if (t < metrics.startDelay) return metrics.startY;
-  const scrollT = t - metrics.startDelay;
-  return Math.max(metrics.endY, metrics.startY - scrollT * metrics.speed);
-}
-
 async function ensureExportLayout(engine) {
   if (document.fonts?.ready) {
     await document.fonts.ready;
@@ -284,7 +263,7 @@ async function ensureExportLayout(engine) {
   }
 }
 
-function canvasToJpegBlob(canvas, quality = 0.85) {
+function canvasToJpegBlob(canvas, quality = 0.78) {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) =>
@@ -293,6 +272,173 @@ function canvasToJpegBlob(canvas, quality = 0.85) {
       quality
     );
   });
+}
+
+function drawBackgroundLayer(ctx, canvasEl, w, h) {
+  const bgImg = canvasEl.querySelector("#bg-image:not(.hidden)");
+  const placeholder = canvasEl.querySelector("#bg-placeholder:not(.hidden)");
+  const overlay = canvasEl.querySelector("#overlay-layer");
+
+  ctx.fillStyle = "#111118";
+  ctx.fillRect(0, 0, w, h);
+
+  const drawMedia = (el, fit) => {
+    if (!el) return;
+    const mw = el.naturalWidth || el.width;
+    const mh = el.naturalHeight || el.height;
+    if (!mw || !mh) return;
+
+    let dw = w;
+    let dh = h;
+    let dx = 0;
+    let dy = 0;
+
+    if (fit === "contain") {
+      const s = Math.min(w / mw, h / mh);
+      dw = mw * s;
+      dh = mh * s;
+      dx = (w - dw) / 2;
+      dy = (h - dh) / 2;
+    } else if (fit === "fill") {
+      dw = w;
+      dh = h;
+    } else {
+      const s = Math.max(w / mw, h / mh);
+      dw = mw * s;
+      dh = mh * s;
+      dx = (w - dw) / 2;
+      dy = (h - dh) / 2;
+    }
+
+    try {
+      ctx.drawImage(el, dx, dy, dw, dh);
+    } catch {
+      /* cross-origin taint */
+    }
+  };
+
+  const fit = bgImg?.dataset.fit || "cover";
+  if (bgImg && !bgImg.classList.contains("hidden")) {
+    drawMedia(bgImg, fit);
+  } else if (placeholder) {
+    const grad = ctx.createLinearGradient(0, 0, w, h);
+    grad.addColorStop(0, "#1a1a2e");
+    grad.addColorStop(0.5, "#16213e");
+    grad.addColorStop(1, "#0f3460");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  const brightness = parseInt(overlay?.dataset.brightness ?? "100", 10);
+  const darken = 1 - brightness / 100;
+  if (darken > 0) {
+    ctx.fillStyle = `rgba(0,0,0,${darken})`;
+    ctx.fillRect(0, 0, w, h);
+  }
+}
+
+function buildBackgroundCache(canvasEl, w, h, ew, eh, drawScale) {
+  const scratch = document.createElement("canvas");
+  scratch.width = w;
+  scratch.height = h;
+  const sctx = scratch.getContext("2d");
+  drawBackgroundLayer(sctx, canvasEl, w, h);
+
+  const overlay = canvasEl.querySelector("#overlay-layer");
+  const bgBlur = parseFloat(overlay?.dataset.blur ?? "0");
+  if (bgBlur > 0) {
+    const snap = sctx.getImageData(0, 0, w, h);
+    sctx.filter = `blur(${bgBlur}px)`;
+    sctx.putImageData(snap, 0, 0);
+    sctx.filter = "none";
+  }
+
+  const cache = document.createElement("canvas");
+  cache.width = ew;
+  cache.height = eh;
+  const ctx = cache.getContext("2d");
+  ctx.setTransform(drawScale, 0, 0, drawScale, 0, 0);
+  ctx.drawImage(scratch, 0, 0);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  return cache;
+}
+
+function buildTextLayerCaches(textContent, w, glowState) {
+  const savedTransform = textContent.style.transform;
+  textContent.style.transform = "translateY(0px)";
+  flushLayout(textContent);
+
+  const originRect = textContent.getBoundingClientRect();
+  const layerH = Math.max(1, Math.ceil(textContent.offsetHeight));
+  const glowOpts = glowState.enabled
+    ? {
+        mode: "glow",
+        glowColor: glowState.color,
+        glowColorHex: glowState.colorHex,
+        glowOpacity: glowState.opacity,
+        glowRadius: glowState.radius,
+        glowSoftness: glowState.softness,
+      }
+    : null;
+
+  const textCanvas = document.createElement("canvas");
+  textCanvas.width = w;
+  textCanvas.height = layerH;
+  drawTextFromDomLayout(
+    textCanvas.getContext("2d"),
+    textContent,
+    originRect,
+    w,
+    layerH
+  );
+
+  let glowCanvas = null;
+  if (glowOpts) {
+    glowCanvas = document.createElement("canvas");
+    glowCanvas.width = w;
+    glowCanvas.height = layerH;
+    const gctx = glowCanvas.getContext("2d");
+    gctx.save();
+    const glowScale = 1 + glowState.radius / 300;
+    gctx.translate(w / 2, 0);
+    gctx.scale(glowScale, 1);
+    gctx.translate(-w / 2, 0);
+    drawTextFromDomLayout(gctx, textContent, originRect, w, layerH, glowOpts);
+    gctx.restore();
+  }
+
+  textContent.style.transform = savedTransform;
+  return { textCanvas, glowCanvas, glowState };
+}
+
+function compositeFrame(
+  ctx,
+  ty,
+  { bgCache, textCanvas, glowCanvas, glowState, w, h, ew, eh, drawScale }
+) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(bgCache, 0, 0);
+  ctx.setTransform(drawScale, 0, 0, drawScale, 0, 0);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, w, h);
+  ctx.clip();
+
+  if (glowCanvas && glowState?.enabled) {
+    ctx.save();
+    ctx.filter = `blur(${glowState.sharpness}px)`;
+    ctx.drawImage(glowCanvas, 0, ty);
+    ctx.restore();
+  }
+
+  if (textCanvas) {
+    ctx.drawImage(textCanvas, 0, ty);
+  }
+
+  ctx.restore();
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
 /**
@@ -308,12 +454,10 @@ export async function exportRecording(canvasEl, engine, hooks = {}) {
     onProgress = () => {},
     onStatus = () => {},
     format = "webm",
-    videoEl = null,
-    bgAudioEl = null,
-    videoVolume = 0,
-    audioVolume = 100,
-    mediaRepeat = "loop",
-    exportVideoEl = null,
+    musicEl = null,
+    voiceEl = null,
+    musicVolume = 100,
+    voiceVolume = 100,
     onFrame = () => {},
   } = hooks;
 
@@ -331,147 +475,22 @@ export async function exportRecording(canvasEl, engine, hooks = {}) {
   recordCanvas.height = eh;
   const ctx = recordCanvas.getContext("2d");
   const drawScale = ew / w;
-  const textContainer = canvasEl.querySelector("#text-scroll-container");
-
-  async function captureFrame() {
-    const bgImg = canvasEl.querySelector("#bg-image:not(.hidden)");
-    const bgGif = canvasEl.querySelector("#bg-gif-canvas:not(.hidden)");
-    const bgVideo =
-      exportVideoEl ||
-      canvasEl.querySelector("#bg-video:not(.hidden)");
-    const placeholder = canvasEl.querySelector("#bg-placeholder:not(.hidden)");
-    const overlay = canvasEl.querySelector("#overlay-layer");
-    const textContent = canvasEl.querySelector("#text-content");
-    const glowState = readGlowState(canvasEl);
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = "#111118";
-    ctx.fillRect(0, 0, ew, eh);
-    ctx.setTransform(drawScale, 0, 0, drawScale, 0, 0);
-
-    const drawMedia = (el, fit) => {
-      if (!el) return;
-      const mw = el.videoWidth || el.naturalWidth || el.width;
-      const mh = el.videoHeight || el.naturalHeight || el.height;
-      if (!mw || !mh) return;
-
-      let dw = w;
-      let dh = h;
-      let dx = 0;
-      let dy = 0;
-
-      if (fit === "contain") {
-        const s = Math.min(w / mw, h / mh);
-        dw = mw * s;
-        dh = mh * s;
-        dx = (w - dw) / 2;
-        dy = (h - dh) / 2;
-      } else if (fit === "fill") {
-        dw = w;
-        dh = h;
-      } else {
-        const s = Math.max(w / mw, h / mh);
-        dw = mw * s;
-        dh = mh * s;
-        dx = (w - dw) / 2;
-        dy = (h - dh) / 2;
-      }
-
-      try {
-        ctx.drawImage(el, dx, dy, dw, dh);
-      } catch {
-        /* cross-origin taint */
-      }
-    };
-
-    const fit =
-      bgImg?.dataset.fit || bgGif?.dataset.fit || bgVideo?.dataset.fit || "cover";
-
-    if (bgVideo && (!bgVideo.classList || !bgVideo.classList.contains("hidden"))) {
-      drawMedia(bgVideo, fit);
-    } else if (bgGif && !bgGif.classList.contains("hidden")) {
-      drawMedia(bgGif, fit);
-    } else if (bgImg && !bgImg.classList.contains("hidden")) {
-      drawMedia(bgImg, fit);
-    } else if (placeholder) {
-      const grad = ctx.createLinearGradient(0, 0, w, h);
-      grad.addColorStop(0, "#1a1a2e");
-      grad.addColorStop(0.5, "#16213e");
-      grad.addColorStop(1, "#0f3460");
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, w, h);
-    }
-
-    const brightness = parseInt(overlay?.dataset.brightness ?? "100", 10);
-    const bgBlur = parseFloat(overlay?.dataset.blur ?? "0");
-    const darken = 1 - brightness / 100;
-    if (darken > 0) {
-      ctx.fillStyle = `rgba(0,0,0,${darken})`;
-      ctx.fillRect(0, 0, w, h);
-    }
-
-    if (textContent && textContainer) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, 0, w, h);
-      ctx.clip();
-
-      if (glowState.enabled) {
-        ctx.save();
-        ctx.filter = `blur(${glowState.sharpness}px)`;
-        const glowScale = 1 + glowState.radius / 300;
-        ctx.translate(w / 2, 0);
-        ctx.scale(glowScale, 1);
-        ctx.translate(-w / 2, 0);
-        drawTextFromDomLayout(ctx, textContent, textContainer, w, h, {
-          mode: "glow",
-          glowColor: glowState.color,
-          glowColorHex: glowState.colorHex,
-          glowOpacity: glowState.opacity,
-          glowRadius: glowState.radius,
-          glowSoftness: glowState.softness,
-        });
-        ctx.restore();
-      }
-
-      drawTextFromDomLayout(ctx, textContent, textContainer, w, h);
-      ctx.restore();
-    }
-
-    if (bgBlur > 0) {
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      const snap = ctx.getImageData(0, 0, ew, eh);
-      ctx.filter = `blur(${bgBlur}px)`;
-      ctx.putImageData(snap, 0, 0);
-      ctx.filter = "none";
-    }
-  }
+  const textContent = canvasEl.querySelector("#text-content");
 
   await ensureExportLayout(engine);
   const totalDuration = engine.getTotalDuration();
+  engine.measure();
 
-  engine.applyTime(0);
-  flushLayout(engine.textEl);
-  const calibratedStartY = measureTextTopInContainer(
-    engine.textEl,
-    textContainer
-  );
-  engine.applyTime(totalDuration);
-  flushLayout(engine.textEl);
-  const calibratedEndY = measureTextTopInContainer(
-    engine.textEl,
-    textContainer
-  );
+  onStatus("Caching background…");
+  const bgCache = buildBackgroundCache(canvasEl, w, h, ew, eh, drawScale);
 
-  const scrollMetrics = {
-    startDelay: engine.startDelay,
-    speed: engine.speed,
-    startY: Number.isFinite(calibratedStartY) ? calibratedStartY : engine.startY,
-    endY: Number.isFinite(calibratedEndY) ? calibratedEndY : engine.endY,
-  };
-  engine.startY = scrollMetrics.startY;
-  engine.endY = scrollMetrics.endY;
+  onStatus("Caching text…");
+  const glowState = readGlowState(canvasEl);
+  const textLayers = textContent
+    ? buildTextLayerCaches(textContent, w, glowState)
+    : { textCanvas: null, glowCanvas: null, glowState };
 
+  const layerBundle = { bgCache, ...textLayers, w, h, ew, eh, drawScale };
   const frameCount = Math.max(1, Math.ceil(totalDuration * FPS));
 
   return encodeFrameSequence({
@@ -479,22 +498,17 @@ export async function exportRecording(canvasEl, engine, hooks = {}) {
     frameCount,
     totalDuration,
     format,
-    renderFrame: async (frameIndex, t) => {
+    renderFrame: async (_frameIndex, t) => {
       engine.applyTime(t);
-      flushLayout(engine.textEl);
-
       await onFrame(t);
-
-      flushLayout(engine.textEl);
-      await captureFrame();
+      compositeFrame(ctx, engine.y, layerBundle);
       return canvasToJpegBlob(recordCanvas);
     },
     audio: {
-      videoSrc: videoEl?.src || null,
-      bgAudioSrc: bgAudioEl?.src || null,
-      videoVolume,
-      audioVolume,
-      mediaRepeat,
+      musicSrc: musicEl?.src || null,
+      voiceSrc: voiceEl?.src || null,
+      musicVolume,
+      voiceVolume,
     },
     onProgress,
     onStatus,

@@ -30,15 +30,6 @@ import {
   shadowStylePayload,
   hexToRgba,
 } from "./textEffects.js";
-import {
-  mapBackgroundTime,
-  GifBackground,
-  supportsGifTimeline,
-} from "./backgroundMedia.js";
-import {
-  ExportVideoSource,
-  seekVideoElementAsync,
-} from "./exportMedia.js";
 
 const state = {
   fontFamily: "Inter",
@@ -69,13 +60,11 @@ const state = {
   fitMode: "cover",
   brightness: 100,
   blur: 0,
-  mediaRepeat: "loop",
-  videoVolume: 0,
-  audioVolume: 100,
+  musicVolume: 100,
+  voiceVolume: 100,
   aspectRatio: "9/16",
   bgUrl: null,
-  bgType: null,
-  animatedGif: false,
+  hasBackgroundImage: false,
   bold: false,
   italic: false,
   editMode: "styled",
@@ -95,17 +84,12 @@ const viewLabelStyled = $("view-label-styled");
 const textContainer = $("text-scroll-container");
 const textGlowBack = $("text-glow-back");
 const bgImage = $("bg-image");
-const bgGifCanvas = $("bg-gif-canvas");
-const bgVideo = $("bg-video");
-const bgAudio = $("bg-audio");
+const bgMusic = $("bg-music");
+const bgVoice = $("bg-voice");
 const bgPlaceholder = $("bg-placeholder");
-const bgMediaOptions = $("bg-media-options");
-const bgVideoAudioOptions = $("bg-video-audio-options");
-const bgRepeatSelect = $("bg-repeat");
-const bgRepeatHint = $("bg-repeat-hint");
 
-let gifBackground = null;
-let bgAudioObjectUrl = null;
+let bgMusicObjectUrl = null;
+let bgVoiceObjectUrl = null;
 const overlayLayer = $("overlay-layer");
 const playbackStatus = $("playback-status");
 const timelineScrub = $("timeline-scrub");
@@ -119,7 +103,6 @@ const panelResizer = $("panel-resizer");
 const engine = new ScrollPreview(canvas, textEl, textContainer);
 let bgObjectUrl = null;
 let isExporting = false;
-const exportVideoSource = new ExportVideoSource();
 let isScrubbing = false;
 let lastStyledHtml = "";
 let plainOnModeEnter = "";
@@ -129,7 +112,7 @@ engine.onStatus = (s) => {
   updatePlayPauseButton();
 };
 engine.onComplete = () => {
-  pauseBackgroundMedia();
+  pauseTimelineAudio();
   updatePlayPauseButton();
 };
 engine.onTimeUpdate = (current, total) => {
@@ -139,10 +122,9 @@ engine.onTimeUpdate = (current, total) => {
   }
   try {
     const isPlaying = engine.running && !engine.paused;
-    syncBackgroundToTimeline(current, { isPlaying });
-    syncBackgroundAudio(current, { isPlaying });
+    syncTimelineAudio(current, { isPlaying });
   } catch (err) {
-    console.error("Background sync failed:", err);
+    console.error("Audio sync failed:", err);
   }
 };
 
@@ -157,12 +139,11 @@ function togglePlayPause() {
   if (isExporting) return;
   if (engine.running && !engine.paused) {
     engine.pause();
-    pauseBackgroundMedia();
-    syncBackgroundToTimeline(engine.timelineTime);
-    syncBackgroundAudio(engine.timelineTime);
+    pauseTimelineAudio();
+    syncTimelineAudio(engine.timelineTime);
   } else {
     engine.play();
-    syncBackgroundToTimeline(engine.timelineTime, { isPlaying: true });
+    syncTimelineAudio(engine.timelineTime, { isPlaying: true });
   }
   updatePlayPauseButton();
 }
@@ -406,231 +387,71 @@ function updateTimelineUI(current, total) {
   timeTotal.textContent = formatTime(total);
   timelineScrub.value = String(Math.round(current * 10));
   $("timeline-duration-label").textContent =
-    `End video length · ${formatTime(total)}`;
+    `Scroll duration · ${formatTime(total)}`;
 }
 
-function updateMediaOptionsUI() {
-  const isVideo = state.bgType === "video";
-  const isGif = state.bgType === "gif";
-  const show = isVideo || isGif || (state.bgType === "image" && state.animatedGif);
-
-  bgMediaOptions.classList.toggle("hidden", !show);
-  bgVideoAudioOptions.classList.toggle("hidden", !isVideo);
-
-  const onceOpt = bgRepeatSelect.querySelector('option[value="once"]');
-  const legacyGif = state.bgType === "image" && state.animatedGif;
-
-  if (onceOpt) {
-    onceOpt.disabled = legacyGif;
-    if (legacyGif && state.mediaRepeat === "once") {
-      state.mediaRepeat = "loop";
-      bgRepeatSelect.value = "loop";
-    }
-  }
-
-  if (legacyGif && !supportsGifTimeline()) {
-    bgRepeatHint.textContent =
-      "Hold-last-frame needs Chrome, Edge, or Safari 17+ for synced GIF.";
-    bgRepeatHint.classList.remove("hidden");
-  } else if (legacyGif) {
-    bgRepeatHint.textContent = "GIF uses the browser’s built-in loop (not synced to scroll).";
-    bgRepeatHint.classList.remove("hidden");
-  } else if (isVideo || isGif) {
-    bgRepeatHint.textContent =
-      "Keeps the background visible for the full scroll when the clip is shorter.";
-    bgRepeatHint.classList.remove("hidden");
-  } else {
-    bgRepeatHint.classList.add("hidden");
-  }
-}
-
-function applyVideoVolume() {
-  if (state.bgType === "video" && bgVideo.src) {
-    applyMediaVolume(bgVideo, state.videoVolume);
-  }
-}
-
-function seekVideoTo(target) {
-  const dur = bgVideo.duration;
-  const t = Number.isFinite(dur) ? Math.max(0, Math.min(target, dur - 0.001)) : target;
-  if (typeof bgVideo.fastSeek === "function") {
-    try {
-      bgVideo.fastSeek(t);
-      return;
-    } catch {
-      /* fall through */
-    }
-  }
-  bgVideo.currentTime = t;
-}
-
-async function syncBackgroundForExport(time, videoEl = exportVideoSource.el) {
-  if (state.bgType === "video" && videoEl?.src) {
-    const dur = videoEl.duration;
-    if (!dur || !Number.isFinite(dur)) return;
-    videoEl.pause();
-    videoEl.loop = false;
-    videoEl.playbackRate = 1;
-    const target = mapBackgroundTime(time, dur, state.mediaRepeat);
-    await seekVideoElementAsync(videoEl, target);
-    return;
-  }
-
-  if (state.bgType === "gif" && gifBackground?.ready) {
-    gifBackground.fit = state.fitMode;
-    gifBackground.resizeToDisplaySize();
-    gifBackground.renderAtTime(time, state.mediaRepeat);
-  }
-}
-
-/** Clear ended state so play() works again after the clip reaches a boundary. */
-function seekVideoToTimelineTarget(time) {
-  const dur = bgVideo.duration;
+function syncAudioTrack(el, time, volume, { isPlaying = false } = {}) {
+  if (!el?.src) return;
+  const dur = el.duration;
   if (!dur || !Number.isFinite(dur)) return;
-  const target = mapBackgroundTime(time, dur, state.mediaRepeat);
-  seekVideoTo(target);
+  syncBgAudioToTimeline(el, time, dur, "loop", isPlaying, volume);
 }
 
-function resumeVideoPlayback(time, dur, isPlaying) {
-  if (!isPlaying) return;
-
-  const target = mapBackgroundTime(time, dur, state.mediaRepeat);
-  applyVideoVolume();
-
-  bgVideo.loop = state.mediaRepeat === "loop";
-  bgVideo.playbackRate = 1;
-  if (bgVideo.ended || bgVideo.paused) {
-    seekVideoTo(target);
-    bgVideo.play().catch(() => {});
-  } else if (Math.abs(bgVideo.currentTime - target) > 0.3) {
-    seekVideoTo(target);
-  }
+function syncTimelineAudio(time, { isPlaying = false } = {}) {
+  syncAudioTrack(bgMusic, time, state.musicVolume, { isPlaying });
+  syncAudioTrack(bgVoice, time, state.voiceVolume, { isPlaying });
 }
 
-let videoRecovering = false;
-
-function onBackgroundVideoEnded() {
-  if (videoRecovering || !engine.running || engine.paused || state.bgType !== "video") {
-    return;
-  }
-  if (state.mediaRepeat === "once") return;
-
-  videoRecovering = true;
-  seekVideoToTimelineTarget(engine.timelineTime);
-  resumeVideoPlayback(engine.timelineTime, bgVideo.duration, true);
-  requestAnimationFrame(() => {
-    videoRecovering = false;
-  });
+function pauseTimelineAudio() {
+  if (bgMusic.src) bgMusic.pause();
+  if (bgVoice.src) bgVoice.pause();
 }
 
-function syncBackgroundAudio(time, { isPlaying = false } = {}) {
-  if (!bgAudio.src) return;
-  const dur = bgAudio.duration;
-  if (!dur || !Number.isFinite(dur)) return;
-  syncBgAudioToTimeline(
-    bgAudio,
-    time,
-    dur,
-    state.mediaRepeat,
-    isPlaying,
-    state.audioVolume
+function clearMusic() {
+  if (bgMusicObjectUrl) URL.revokeObjectURL(bgMusicObjectUrl);
+  bgMusicObjectUrl = null;
+  bgMusic.pause();
+  bgMusic.removeAttribute("src");
+  $("bg-music-filename").textContent = "No music";
+}
+
+function clearVoiceover() {
+  if (bgVoiceObjectUrl) URL.revokeObjectURL(bgVoiceObjectUrl);
+  bgVoiceObjectUrl = null;
+  bgVoice.pause();
+  bgVoice.removeAttribute("src");
+  $("bg-voice-filename").textContent = "No voiceover";
+}
+
+function loadMusic(file) {
+  clearMusic();
+  const url = URL.createObjectURL(file);
+  bgMusicObjectUrl = url;
+  $("bg-music-filename").textContent = file.name;
+  bgMusic.src = url;
+  bgMusic.addEventListener(
+    "loadedmetadata",
+    () => {
+      applyMediaVolume(bgMusic, state.musicVolume);
+      syncTimelineAudio(engine.timelineTime, {
+        isPlaying: engine.running && !engine.paused,
+      });
+    },
+    { once: true }
   );
 }
 
-function pauseBackgroundMedia() {
-  pauseBackgroundVideo();
-  if (bgAudio.src) bgAudio.pause();
-}
-
-function initBackgroundVideo() {
-  bgVideo.addEventListener("ended", onBackgroundVideoEnded);
-  bgVideo.addEventListener("pause", () => {
-    if (!engine.running || engine.paused || state.bgType !== "video") return;
-    if (state.mediaRepeat === "once") return;
-    const dur = bgVideo.duration;
-    if (!dur || !Number.isFinite(dur)) return;
-    if (bgVideo.ended || bgVideo.currentTime >= dur - 0.05) {
-      requestAnimationFrame(() => {
-        if (engine.running && !engine.paused) {
-          onBackgroundVideoEnded();
-        }
-      });
-    }
-  });
-}
-
-function syncBackgroundToTimeline(time, { isPlaying = false } = {}) {
-  if (state.bgType === "video" && bgVideo.src) {
-    const setFrame = () => {
-      const dur = bgVideo.duration;
-      if (!dur || !Number.isFinite(dur)) return;
-
-      applyVideoVolume();
-
-      if (state.mediaRepeat === "loop" && isPlaying) {
-        resumeVideoPlayback(time, dur, true);
-        return;
-      }
-
-      bgVideo.playbackRate = 1;
-      bgVideo.loop = false;
-      const target = mapBackgroundTime(time, dur, state.mediaRepeat);
-
-      bgVideo.pause();
-
-      if (Math.abs(bgVideo.currentTime - target) > 0.02) {
-        if (typeof bgVideo.fastSeek === "function") {
-          try {
-            bgVideo.fastSeek(target);
-          } catch {
-            bgVideo.currentTime = target;
-          }
-        } else {
-          bgVideo.currentTime = target;
-        }
-      }
-    };
-
-    if (bgVideo.readyState >= 1) {
-      setFrame();
-    } else {
-      bgVideo.addEventListener("loadedmetadata", setFrame, { once: true });
-    }
-    return;
-  }
-
-  if (state.bgType === "gif" && gifBackground?.ready) {
-    gifBackground.fit = state.fitMode;
-    gifBackground.resizeToDisplaySize();
-    gifBackground.renderAtTime(time, state.mediaRepeat);
-  }
-}
-
-function pauseBackgroundVideo() {
-  if (state.bgType === "video" && bgVideo.src) {
-    bgVideo.pause();
-  }
-}
-
-function clearBackgroundAudio() {
-  if (bgAudioObjectUrl) URL.revokeObjectURL(bgAudioObjectUrl);
-  bgAudioObjectUrl = null;
-  bgAudio.pause();
-  bgAudio.removeAttribute("src");
-  $("bg-audio-filename").textContent = "No background audio";
-}
-
-function loadBackgroundAudio(file) {
-  clearBackgroundAudio();
+function loadVoiceover(file) {
+  clearVoiceover();
   const url = URL.createObjectURL(file);
-  bgAudioObjectUrl = url;
-  $("bg-audio-filename").textContent = file.name;
-  bgAudio.src = url;
-  bgAudio.addEventListener(
+  bgVoiceObjectUrl = url;
+  $("bg-voice-filename").textContent = file.name;
+  bgVoice.src = url;
+  bgVoice.addEventListener(
     "loadedmetadata",
     () => {
-      applyMediaVolume(bgAudio, state.audioVolume);
-      syncBackgroundAudio(engine.timelineTime, {
+      applyMediaVolume(bgVoice, state.voiceVolume);
+      syncTimelineAudio(engine.timelineTime, {
         isPlaying: engine.running && !engine.paused,
       });
     },
@@ -665,7 +486,6 @@ function updateScrollStartControl() {
 function remeasureAndApply() {
   updateScrollStartControl();
   engine.applyTime(engine.timelineTime);
-  syncBackgroundToTimeline(engine.timelineTime);
   refreshDuration();
 }
 
@@ -684,11 +504,7 @@ function bindRange(id, valId, format, onChange) {
 function applyBackground() {
   const fit = state.fitMode;
   bgImage.dataset.fit = fit;
-  bgVideo.dataset.fit = fit;
-  bgGifCanvas.dataset.fit = fit;
   bgImage.style.objectFit = fit === "fill" ? "fill" : fit;
-  bgVideo.style.objectFit = fit === "fill" ? "fill" : fit;
-  if (gifBackground) gifBackground.fit = fit;
 
   overlayLayer.dataset.brightness = String(state.brightness);
   overlayLayer.dataset.blur = String(state.blur);
@@ -707,81 +523,32 @@ function clearBackground() {
   if (bgObjectUrl) URL.revokeObjectURL(bgObjectUrl);
   bgObjectUrl = null;
   state.bgUrl = null;
-  state.bgType = null;
-  state.animatedGif = false;
-  gifBackground?.dispose();
-  gifBackground = null;
+  state.hasBackgroundImage = false;
   bgImage.classList.add("hidden");
-  bgGifCanvas.classList.add("hidden");
-  bgVideo.classList.add("hidden");
-  clearBackgroundAudio();
   bgImage.removeAttribute("src");
-  bgVideo.pause();
-  bgVideo.removeAttribute("src");
   bgPlaceholder.classList.remove("hidden");
   $("bg-filename").textContent = "No file — gradient placeholder";
-  updateMediaOptionsUI();
 }
 
 async function loadBackground(file) {
+  const allowed = ["image/jpeg", "image/png", "image/webp"];
+  if (!allowed.includes(file.type)) {
+    alert("Background must be a still image (JPG, PNG, or WebP).");
+    return;
+  }
+
   clearBackground();
   const url = URL.createObjectURL(file);
   bgObjectUrl = url;
   state.bgUrl = url;
+  state.hasBackgroundImage = true;
   $("bg-filename").textContent = file.name;
 
-  if (file.type.startsWith("video/")) {
-    state.bgType = "video";
-    bgVideo.loop = false;
-    bgVideo.classList.remove("hidden");
-    bgPlaceholder.classList.add("hidden");
-    applyVideoVolume();
-    updateMediaOptionsUI();
-
-    const onReady = () => {
-      bgVideo.pause();
-      bgVideo.currentTime = 0;
-      engine.applyTime(0);
-      syncBackgroundToTimeline(0);
-      refreshDuration();
-      updateMediaOptionsUI();
-    };
-
-    bgVideo.addEventListener("loadeddata", onReady, { once: true });
-    bgVideo.src = url;
-  } else if (file.type === "image/gif" && supportsGifTimeline()) {
-    state.bgType = "gif";
-    $("bg-filename").textContent = `${file.name} (decoding…)`;
-    bgGifCanvas.classList.remove("hidden");
-    bgPlaceholder.classList.add("hidden");
-
-    try {
-      gifBackground = new GifBackground(bgGifCanvas);
-      await gifBackground.load(url);
-      $("bg-filename").textContent = file.name;
-      engine.applyTime(0);
-      syncBackgroundToTimeline(0);
-      remeasureAndApply();
-      updateMediaOptionsUI();
-    } catch (err) {
-      console.error(err);
-      clearBackground();
-      $("bg-filename").textContent = "GIF failed to load — try another file";
-      alert("Could not decode this GIF. Try a smaller file or use MP4/WebM.");
-    }
-  } else {
-    state.bgType = "image";
-    state.animatedGif = file.type === "image/gif";
-    bgImage.onload = () => {
-      remeasureAndApply();
-      updateMediaOptionsUI();
-    };
-    bgImage.src = url;
-    bgImage.classList.remove("hidden");
-    bgPlaceholder.classList.add("hidden");
-    requestAnimationFrame(() => remeasureAndApply());
-    if (state.animatedGif) updateMediaOptionsUI();
-  }
+  bgImage.onload = () => remeasureAndApply();
+  bgImage.src = url;
+  bgImage.classList.remove("hidden");
+  bgPlaceholder.classList.add("hidden");
+  requestAnimationFrame(() => remeasureAndApply());
   applyBackground();
 }
 
@@ -1039,29 +806,24 @@ function initControls() {
     applyBackground();
   });
 
-  bgRepeatSelect.addEventListener("change", (e) => {
-    state.mediaRepeat = e.target.value;
-    syncBackgroundToTimeline(engine.timelineTime, {
-      isPlaying: engine.running && !engine.paused,
-    });
-    syncBackgroundAudio(engine.timelineTime, {
-      isPlaying: engine.running && !engine.paused,
-    });
+  bindRange("bg-music-volume", "bg-music-volume-val", (v) => `${v}%`, (v) => {
+    state.musicVolume = v;
+    applyMediaVolume(bgMusic, state.musicVolume);
   });
 
-  bindRange("bg-video-volume", "bg-video-volume-val", (v) => `${v}%`, (v) => {
-    state.videoVolume = v;
-    applyVideoVolume();
+  bindRange("bg-voice-volume", "bg-voice-volume-val", (v) => `${v}%`, (v) => {
+    state.voiceVolume = v;
+    applyMediaVolume(bgVoice, state.voiceVolume);
   });
 
-  bindRange("bg-audio-volume", "bg-audio-volume-val", (v) => `${v}%`, (v) => {
-    state.audioVolume = v;
-    applyMediaVolume(bgAudio, state.audioVolume);
-  });
-
-  $("bg-audio-upload").addEventListener("change", (e) => {
+  $("bg-music-upload").addEventListener("change", (e) => {
     const file = e.target.files?.[0];
-    if (file) loadBackgroundAudio(file);
+    if (file) loadMusic(file);
+  });
+
+  $("bg-voice-upload").addEventListener("change", (e) => {
+    const file = e.target.files?.[0];
+    if (file) loadVoiceover(file);
   });
 
   $("aspect-ratio").addEventListener("change", (e) => {
@@ -1141,7 +903,7 @@ function initTimeline() {
     if (isExporting) return;
     isScrubbing = true;
     if (engine.running) engine.pause();
-    pauseBackgroundMedia();
+    pauseTimelineAudio();
     updatePlayPauseButton();
   });
 
@@ -1149,8 +911,7 @@ function initTimeline() {
     if (isExporting) return;
     const t = parseInt(timelineScrub.value, 10) / 10;
     engine.seek(t);
-    syncBackgroundToTimeline(t);
-    syncBackgroundAudio(t);
+    syncTimelineAudio(t);
     timeCurrent.textContent = formatTime(t);
     const total = engine.getTotalDuration();
     timeTotal.textContent = formatTime(total);
@@ -1166,16 +927,15 @@ function initTransport() {
 
   $("btn-reset").addEventListener("click", () => {
     engine.reset();
-    if (state.bgType === "video" && bgVideo.src) {
-      bgVideo.pause();
-      bgVideo.currentTime = 0;
+    if (bgMusic.src) {
+      bgMusic.pause();
+      bgMusic.currentTime = 0;
     }
-    if (bgAudio.src) {
-      bgAudio.pause();
-      bgAudio.currentTime = 0;
+    if (bgVoice.src) {
+      bgVoice.pause();
+      bgVoice.currentTime = 0;
     }
-    syncBackgroundToTimeline(0);
-    syncBackgroundAudio(0);
+    syncTimelineAudio(0);
     refreshDuration();
     updatePlayPauseButton();
   });
@@ -1183,10 +943,8 @@ function initTransport() {
   $("btn-preview").addEventListener("click", () => {
     if (isExporting) return;
     engine.reset();
-    syncBackgroundToTimeline(0);
     engine.play();
-    syncBackgroundToTimeline(0, { isPlaying: true });
-    syncBackgroundAudio(0, { isPlaying: true });
+    syncTimelineAudio(0, { isPlaying: true });
     updatePlayPauseButton();
   });
 }
@@ -1213,7 +971,7 @@ async function runExport() {
   try {
     syncFromEditor();
     engine.stop();
-    pauseBackgroundMedia();
+    pauseTimelineAudio();
     engine.speed = state.scrollSpeed;
     engine.startDelay = state.startDelay;
     engine.scrollStartY = state.scrollStartY;
@@ -1222,28 +980,21 @@ async function runExport() {
     }
     updateScrollStartControl();
     engine.reset();
-    syncBackgroundToTimeline(0);
 
     progressLabel.textContent = "Preparing export…";
-    const exportVideoEl =
-      state.bgType === "video"
-        ? await exportVideoSource.prepareFrom(bgVideo)
-        : null;
 
     const format = $("export-format").value;
     const blob = await exportRecording(canvas, engine, {
       format,
-      exportVideoEl,
-      videoEl: state.bgType === "video" ? bgVideo : null,
-      bgAudioEl: bgAudio.src ? bgAudio : null,
-      videoVolume: state.videoVolume,
-      audioVolume: state.audioVolume,
-      mediaRepeat: state.mediaRepeat,
+      musicEl: bgMusic.src ? bgMusic : null,
+      voiceEl: bgVoice.src ? bgVoice : null,
+      musicVolume: state.musicVolume,
+      voiceVolume: state.voiceVolume,
       onFrame: async (t) => {
         if (state.glowEnabled && textGlowBack) {
           syncGlowLayer();
         }
-        await syncBackgroundForExport(t, exportVideoEl);
+        syncTimelineAudio(t);
       },
       onProgress: (pct) => {
         progressFill.style.width = `${pct}%`;
@@ -1259,7 +1010,7 @@ async function runExport() {
     );
     progressLabel.textContent = "Export complete — download started";
     playbackStatus.textContent = "Export complete";
-    pauseBackgroundMedia();
+    pauseTimelineAudio();
   } catch (err) {
     console.error(err);
     progressLabel.textContent = `Export failed: ${err.message}`;
@@ -1267,7 +1018,6 @@ async function runExport() {
     alert(`Export failed: ${err.message}`);
   } finally {
     engine.onTimeUpdate = savedOnTimeUpdate;
-    exportVideoSource.dispose();
     isExporting = false;
     exportBtn.disabled = false;
     btnPlayPause.disabled = false;
@@ -1290,37 +1040,31 @@ function serializeSettings() {
 async function collectProjectMedia() {
   let background = null;
 
-  if (state.bgType === "video" && bgVideo.src) {
-    background = await urlToDataPayload(
-      bgVideo.currentSrc || bgVideo.src,
-      cleanBgFileName($("bg-filename").textContent),
-      { type: "video" }
-    );
-  } else if (state.bgType === "gif" && bgObjectUrl) {
-    background = await urlToDataPayload(
-      bgObjectUrl,
-      cleanBgFileName($("bg-filename").textContent),
-      { type: "gif" }
-    );
-  } else if (state.bgType === "image" && bgImage.src) {
+  if (state.hasBackgroundImage && bgImage.src) {
     background = await urlToDataPayload(
       bgImage.currentSrc || bgImage.src,
       cleanBgFileName($("bg-filename").textContent),
-      { type: "image", animatedGif: state.animatedGif }
+      { type: "image" }
     );
   }
 
-  let audio = null;
-  if (bgAudio.src) {
-    const audioName = $("bg-audio-filename").textContent;
-    if (!audioName.startsWith("No background")) {
-      audio = await urlToDataPayload(bgAudio.currentSrc || bgAudio.src, audioName, {
-        type: "audio",
-      });
-    }
+  let music = null;
+  const musicName = $("bg-music-filename").textContent;
+  if (bgMusic.src && !musicName.startsWith("No music")) {
+    music = await urlToDataPayload(bgMusic.currentSrc || bgMusic.src, musicName, {
+      type: "music",
+    });
   }
 
-  return { background, audio };
+  let voiceover = null;
+  const voiceName = $("bg-voice-filename").textContent;
+  if (bgVoice.src && !voiceName.startsWith("No voiceover")) {
+    voiceover = await urlToDataPayload(bgVoice.currentSrc || bgVoice.src, voiceName, {
+      type: "voiceover",
+    });
+  }
+
+  return { background, music, voiceover };
 }
 
 async function saveProjectJson() {
@@ -1400,9 +1144,8 @@ function init() {
   initControls();
   initCollapsibles();
   initPanelResize();
-  initBackgroundVideo();
-  applyVideoVolume();
-  applyMediaVolume(bgAudio, state.audioVolume);
+  applyMediaVolume(bgMusic, state.musicVolume);
+  applyMediaVolume(bgVoice, state.voiceVolume);
   initTimeline();
   initTransport();
   initExport();

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ScrollDrop — Scrolling Text Over Any Background</title>
-  <meta name="description" content="Place animated scrolling text over images, GIFs, or video. Export as WebM or MP4 — no install, no server." />
+  <meta name="description" content="Place animated scrolling text over a still image with music and voiceover. Export as WebM or MP4 — no install, no server." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -222,8 +222,8 @@
       <section class="control-section">
         <h2>Background</h2>
         <label class="control-label file-upload">
-          <span class="btn btn-secondary btn-block">Upload image, GIF, or video</span>
-          <input type="file" id="bg-upload" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm" hidden />
+          <span class="btn btn-secondary btn-block">Upload background image</span>
+          <input type="file" id="bg-upload" accept="image/jpeg,image/png,image/webp" hidden />
         </label>
         <p id="bg-filename" class="hint">No file — gradient placeholder</p>
 
@@ -244,29 +244,25 @@
         </label>
         <input type="range" id="blur" min="0" max="24" value="0" />
 
-        <div id="bg-media-options" class="bg-media-options hidden">
-          <label class="control-label" for="bg-repeat">When scroll is longer than clip</label>
-          <select id="bg-repeat">
-            <option value="loop" selected>Loop</option>
-            <option value="once">Play once, then hold last frame</option>
-          </select>
-          <p id="bg-repeat-hint" class="hint hidden"></p>
-        </div>
-        <div id="bg-video-audio-options" class="bg-audio-block hidden">
-          <label class="control-label" for="bg-video-volume">
-            Video volume <span id="bg-video-volume-val" class="value-badge">0%</span>
-          </label>
-          <input type="range" id="bg-video-volume" min="0" max="100" value="0" />
-        </div>
         <label class="control-label file-upload">
-          <span class="btn btn-secondary btn-block">Upload background audio (MP3, WAV)</span>
-          <input type="file" id="bg-audio-upload" accept="audio/mpeg,audio/wav,audio/mp3,.mp3,.wav" hidden />
+          <span class="btn btn-secondary btn-block">Upload music (MP3, WAV)</span>
+          <input type="file" id="bg-music-upload" accept="audio/mpeg,audio/wav,audio/mp3,.mp3,.wav" hidden />
         </label>
-        <p id="bg-audio-filename" class="hint">No background audio</p>
-        <label class="control-label" for="bg-audio-volume">
-          Audio volume <span id="bg-audio-volume-val" class="value-badge">100%</span>
+        <p id="bg-music-filename" class="hint">No music</p>
+        <label class="control-label" for="bg-music-volume">
+          Music volume <span id="bg-music-volume-val" class="value-badge">100%</span>
         </label>
-        <input type="range" id="bg-audio-volume" min="0" max="100" value="100" />
+        <input type="range" id="bg-music-volume" min="0" max="100" value="100" />
+
+        <label class="control-label file-upload">
+          <span class="btn btn-secondary btn-block">Upload voiceover (MP3, WAV)</span>
+          <input type="file" id="bg-voice-upload" accept="audio/mpeg,audio/wav,audio/mp3,.mp3,.wav" hidden />
+        </label>
+        <p id="bg-voice-filename" class="hint">No voiceover</p>
+        <label class="control-label" for="bg-voice-volume">
+          Voiceover volume <span id="bg-voice-volume-val" class="value-badge">100%</span>
+        </label>
+        <input type="range" id="bg-voice-volume" min="0" max="100" value="100" />
       </section>
 
       <section class="control-section">
@@ -291,9 +287,8 @@
               <span>Upload a background or use the gradient</span>
             </div>
             <img id="bg-image" class="bg-media hidden" alt="" />
-            <canvas id="bg-gif-canvas" class="bg-media bg-gif-canvas hidden" aria-hidden="true"></canvas>
-            <video id="bg-video" class="bg-media hidden" playsinline preload="auto"></video>
-            <audio id="bg-audio" class="hidden" preload="auto"></audio>
+            <audio id="bg-music" class="hidden" preload="auto"></audio>
+            <audio id="bg-voice" class="hidden" preload="auto"></audio>
           </div>
           <div class="overlay-layer" id="overlay-layer"></div>
           <div class="text-scroll-container" id="text-scroll-container">
@@ -322,7 +317,7 @@
           aria-label="Timeline position"
         />
         <span id="time-total" class="timeline-time">0:00.0</span>
-        <span id="timeline-duration-label" class="timeline-hint">End video length</span>
+        <span id="timeline-duration-label" class="timeline-hint">Scroll duration</span>
       </div>
 
       <div id="export-progress" class="export-progress hidden" role="status" aria-live="polite">

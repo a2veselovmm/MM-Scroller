@@ -56,9 +56,11 @@ export async function buildProjectDocument(payload) {
 export function estimateProjectSize(doc) {
   let bytes = 0;
   const bg = doc.media?.background?.dataUrl;
-  const audio = doc.media?.audio?.dataUrl;
+  const music = doc.media?.music?.dataUrl;
+  const voice = doc.media?.voiceover?.dataUrl;
   if (typeof bg === "string") bytes += bg.length;
-  if (typeof audio === "string") bytes += audio.length;
+  if (typeof music === "string") bytes += music.length;
+  if (typeof voice === "string") bytes += voice.length;
   bytes += JSON.stringify(doc).length;
   return bytes;
 }
