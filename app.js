@@ -8,6 +8,8 @@ import {
   buildProjectDocument,
   downloadProjectJson,
   estimateProjectSize,
+  parseProjectDocument,
+  dataUrlToFile,
   urlToDataPayload,
   cleanBgFileName,
 } from "./projectIO.js";
@@ -120,6 +122,7 @@ const panelResizer = $("panel-resizer");
 const engine = new ScrollPreview(canvas, textEl, textContainer);
 let bgObjectUrl = null;
 let isExporting = false;
+let isImporting = false;
 let isScrubbing = false;
 let lastStyledHtml = "";
 let plainOnModeEnter = "";
@@ -128,6 +131,7 @@ let fontPickerApi = null;
 const undoManager = createUndoManager(captureUndoSnapshot, applyUndoSnapshot);
 
 function pushUndo() {
+  if (isImporting || undoManager.isRestoring()) return;
   undoManager.push();
 }
 
@@ -460,7 +464,7 @@ function syncFromEditor() {
 
 function setEditMode(mode) {
   if (mode === state.editMode) return;
-  if (!undoManager.isRestoring()) pushUndo();
+  if (!undoManager.isRestoring() && !isImporting) pushUndo();
 
   if (mode === "plain") {
     lastStyledHtml = textEditor.innerHTML;
@@ -669,7 +673,7 @@ function clearVoiceover() {
 }
 
 function loadMusic(file) {
-  if (!undoManager.isRestoring()) pushUndo();
+  if (!undoManager.isRestoring() && !isImporting) pushUndo();
   clearMusic();
   const url = URL.createObjectURL(file);
   bgMusicObjectUrl = url;
@@ -687,7 +691,7 @@ function loadMusic(file) {
 }
 
 function loadVoiceover(file) {
-  if (!undoManager.isRestoring()) pushUndo();
+  if (!undoManager.isRestoring() && !isImporting) pushUndo();
   clearVoiceover();
   const url = URL.createObjectURL(file);
   bgVoiceObjectUrl = url;
@@ -850,7 +854,7 @@ async function loadBackground(file) {
     return;
   }
 
-  if (!undoManager.isRestoring()) pushUndo();
+  if (!undoManager.isRestoring() && !isImporting) pushUndo();
   clearBackground();
   const url = URL.createObjectURL(file);
   bgObjectUrl = url;
@@ -1376,6 +1380,7 @@ async function runExport() {
   exportBtn.disabled = true;
   btnPlayPause.disabled = true;
   $("btn-export-setup").disabled = true;
+  $("btn-import-setup").disabled = true;
   timelineScrub.disabled = true;
   progressEl.classList.remove("hidden");
   canvas.classList.add("is-recording");
@@ -1434,6 +1439,7 @@ async function runExport() {
     exportBtn.disabled = false;
     btnPlayPause.disabled = false;
     $("btn-export-setup").disabled = false;
+    $("btn-import-setup").disabled = false;
     timelineScrub.disabled = false;
     canvas.classList.remove("is-recording");
     setTimeout(() => progressEl.classList.add("hidden"), 3000);
@@ -1545,6 +1551,195 @@ async function buildSetupDocument(embedMedia) {
   });
 }
 
+const STATE_MEDIA_KEYS = new Set(["bgUrl", "hasBackgroundImage"]);
+
+function applySettingsFromDocument(settings) {
+  if (!settings || typeof settings !== "object") return;
+
+  const legacyScrollKeys = new Set(["scrollStartY", "scrollEndY", "scrollEndAuto"]);
+
+  for (const [key, value] of Object.entries(settings)) {
+    if (STATE_MEDIA_KEYS.has(key)) continue;
+    if (key in state || legacyScrollKeys.has(key)) state[key] = value;
+  }
+}
+
+function applyImportedText(text) {
+  if (!text) return;
+
+  lastStyledHtml =
+    text.styledHtml && String(text.styledHtml).trim()
+      ? text.styledHtml
+      : defaultEditorHtml();
+  textPlain.value = text.plainText ?? htmlToPlain(lastStyledHtml);
+  plainOnModeEnter = textPlain.value;
+
+  const mode = text.editMode === "plain" ? "plain" : "styled";
+  state.editMode = mode;
+  editModeToggle.checked = mode === "styled";
+  textEditorWrap.dataset.mode = mode;
+
+  if (mode === "styled") {
+    textEditor.innerHTML = lastStyledHtml;
+    textEditor.classList.remove("hidden");
+    textPlain.classList.add("hidden");
+    viewLabelPlain.classList.remove("is-active");
+    viewLabelStyled.classList.add("is-active");
+    editModeHint.textContent =
+      "Styled — select words and format visually. Updates preview live.";
+  } else {
+    textEditor.classList.add("hidden");
+    textPlain.classList.remove("hidden");
+    viewLabelPlain.classList.add("is-active");
+    viewLabelStyled.classList.remove("is-active");
+    editModeHint.textContent =
+      "Plain text editor only. Preview and export keep your styled text.";
+  }
+}
+
+function applyUiFromDocument(ui) {
+  if (!ui || typeof ui !== "object") return;
+
+  if (ui.panelWidth) {
+    const w = parseInt(String(ui.panelWidth).replace(/px$/, ""), 10);
+    if (!Number.isNaN(w)) {
+      const clamped = Math.min(560, Math.max(260, w));
+      appMain.style.setProperty("--panel-w", `${clamped}px`);
+      localStorage.setItem("scrolldrop-panel-w", String(clamped));
+    }
+  }
+
+  if (ui.collapsibles && typeof ui.collapsibles === "object") {
+    for (const [id, open] of Object.entries(ui.collapsibles)) {
+      const el = document.getElementById(id);
+      if (el && "open" in el) el.open = !!open;
+    }
+  }
+
+  if (ui.activeTab && CONTROL_TAB_IDS.includes(ui.activeTab)) {
+    activateControlTab(ui.activeTab);
+  }
+}
+
+async function applyMediaFromDocument(media) {
+  clearBackground();
+  clearMusic();
+  clearVoiceover();
+
+  if (!media || typeof media !== "object") return;
+
+  const bg = media.background;
+  if (bg?.dataUrl) {
+    try {
+      const file = await dataUrlToFile(bg);
+      await loadBackground(file);
+    } catch (err) {
+      console.warn(err);
+      $("bg-filename").textContent = `${bg.fileName || "background"} (import failed)`;
+    }
+  } else if (bg?.fileName) {
+    $("bg-filename").textContent = `${bg.fileName} (not embedded — re-upload)`;
+  }
+
+  const music = media.music;
+  if (music?.dataUrl) {
+    try {
+      const file = await dataUrlToFile(music);
+      loadMusic(file);
+    } catch (err) {
+      console.warn(err);
+      $("bg-music-filename").textContent = `${music.fileName || "music"} (import failed)`;
+    }
+  } else if (music?.fileName) {
+    $("bg-music-filename").textContent = `${music.fileName} (not embedded — re-upload)`;
+  }
+
+  const voice = media.voiceover;
+  if (voice?.dataUrl) {
+    try {
+      const file = await dataUrlToFile(voice);
+      loadVoiceover(file);
+    } catch (err) {
+      console.warn(err);
+      $("bg-voice-filename").textContent = `${voice.fileName || "voiceover"} (import failed)`;
+    }
+  } else if (voice?.fileName) {
+    $("bg-voice-filename").textContent = `${voice.fileName} (not embedded — re-upload)`;
+  }
+}
+
+async function applyProjectDocument(doc) {
+  engine.stop();
+  pauseTimelineAudio();
+
+  applySettingsFromDocument(doc.settings);
+  applyImportedText(doc.text);
+  await applyMediaFromDocument(doc.media);
+
+  const timeline = doc.timeline;
+  if (timeline && typeof timeline === "object") {
+    if (timeline.speed != null) {
+      state.scrollSpeed = timeline.speed;
+      engine.speed = timeline.speed;
+    }
+    if (timeline.startDelay != null) {
+      state.startDelay = timeline.startDelay;
+      engine.startDelay = timeline.startDelay;
+    }
+    if (timeline.scrollFirstRow != null) state.scrollFirstRow = timeline.scrollFirstRow;
+    if (timeline.scrollLastRow != null) state.scrollLastRow = timeline.scrollLastRow;
+  }
+
+  setAspectRatio(state.aspectRatio);
+  syncEngineDesignSpace();
+  applyStateToControls();
+  applyBackground();
+  applyMusicLoop();
+  refreshPreview();
+  updateScrollPositionControls();
+
+  const position =
+    timeline && typeof timeline.position === "number" ? timeline.position : 0;
+  engine.applyTime(position);
+  refreshDuration();
+  updatePlayPauseButton();
+  refreshToolbarFromSelection();
+  syncTimelineAudio(engine.timelineTime, { isPlaying: false });
+
+  applyUiFromDocument(doc.ui);
+}
+
+async function importSetupJson(file) {
+  if (!file || isExporting) return;
+
+  const text = await file.text();
+  const doc = parseProjectDocument(text);
+
+  const importBtn = $("btn-import-setup");
+  const exportBtn = $("btn-export-setup");
+  const prevLabel = importBtn?.textContent;
+
+  isImporting = true;
+  importBtn.disabled = true;
+  exportBtn.disabled = true;
+  if (importBtn) importBtn.textContent = "Importing…";
+
+  try {
+    await applyProjectDocument(doc);
+    undoManager.reset();
+    playbackStatus.textContent = "Setup imported from JSON";
+  } catch (err) {
+    console.error(err);
+    alert(`Could not import setup: ${err.message}`);
+    playbackStatus.textContent = "Setup import failed";
+  } finally {
+    isImporting = false;
+    importBtn.disabled = false;
+    exportBtn.disabled = false;
+    if (importBtn && prevLabel != null) importBtn.textContent = prevLabel;
+  }
+}
+
 async function exportSetupJson(options = {}) {
   if (isExporting) return;
 
@@ -1595,6 +1790,15 @@ async function exportSetupJson(options = {}) {
 
 function initExport() {
   $("btn-export").addEventListener("click", runExport);
+
+  const importInput = $("import-setup-file");
+  $("btn-import-setup").addEventListener("click", () => importInput?.click());
+  importInput?.addEventListener("change", async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) await importSetupJson(file);
+  });
+
   $("btn-export-setup").addEventListener("click", () => {
     const embedMedia = $("export-setup-embed-media").checked;
     exportSetupJson({
@@ -1622,32 +1826,30 @@ function initCollapsibles() {
 
 const CONTROL_TAB_IDS = ["text", "background", "audio", "settings"];
 
+function activateControlTab(tabId) {
+  if (!CONTROL_TAB_IDS.includes(tabId)) tabId = "text";
+
+  document.querySelectorAll(".control-tab").forEach((tab) => {
+    const on = tab.dataset.tab === tabId;
+    tab.classList.toggle("is-active", on);
+    tab.setAttribute("aria-selected", on ? "true" : "false");
+    tab.tabIndex = on ? 0 : -1;
+  });
+
+  document.querySelectorAll(".control-tab-panel").forEach((panel) => {
+    const on = panel.id === `tab-panel-${tabId}`;
+    panel.classList.toggle("is-active", on);
+    panel.hidden = !on;
+  });
+
+  localStorage.setItem("scrolldrop-active-tab", tabId);
+}
+
 function initControlTabs() {
   const tabs = document.querySelectorAll(".control-tab");
-  const panels = document.querySelectorAll(".control-tab-panel");
-  const storageKey = "scrolldrop-active-tab";
-
-  const activate = (tabId) => {
-    if (!CONTROL_TAB_IDS.includes(tabId)) tabId = "text";
-
-    tabs.forEach((tab) => {
-      const on = tab.dataset.tab === tabId;
-      tab.classList.toggle("is-active", on);
-      tab.setAttribute("aria-selected", on ? "true" : "false");
-      tab.tabIndex = on ? 0 : -1;
-    });
-
-    panels.forEach((panel) => {
-      const on = panel.id === `tab-panel-${tabId}`;
-      panel.classList.toggle("is-active", on);
-      panel.hidden = !on;
-    });
-
-    localStorage.setItem(storageKey, tabId);
-  };
 
   tabs.forEach((tab) => {
-    tab.addEventListener("click", () => activate(tab.dataset.tab));
+    tab.addEventListener("click", () => activateControlTab(tab.dataset.tab));
     tab.addEventListener("keydown", (e) => {
       const idx = CONTROL_TAB_IDS.indexOf(tab.dataset.tab);
       if (idx < 0) return;
@@ -1665,8 +1867,8 @@ function initControlTabs() {
     });
   });
 
-  const saved = localStorage.getItem(storageKey);
-  activate(CONTROL_TAB_IDS.includes(saved) ? saved : "text");
+  const saved = localStorage.getItem("scrolldrop-active-tab");
+  activateControlTab(CONTROL_TAB_IDS.includes(saved) ? saved : "text");
 }
 
 function init() {

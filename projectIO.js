@@ -79,4 +79,50 @@ export function downloadProjectJson(doc, filename = "scrolldrop-project.json") {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * @param {string | object} raw
+ * @returns {object}
+ */
+export function parseProjectDocument(raw) {
+  let doc = raw;
+  if (typeof raw === "string") {
+    try {
+      doc = JSON.parse(raw);
+    } catch {
+      throw new Error("Invalid JSON file.");
+    }
+  }
+  if (!doc || typeof doc !== "object") {
+    throw new Error("Invalid setup file.");
+  }
+  const meta = doc.scrolldrop;
+  if (!meta || typeof meta !== "object") {
+    throw new Error("Not an MM-Scroller setup file (missing scrolldrop metadata).");
+  }
+  const version = Number(meta.version);
+  if (Number.isFinite(version) && version > PROJECT_FORMAT_VERSION) {
+    throw new Error(
+      `Setup version ${version} is newer than this app supports (v${PROJECT_FORMAT_VERSION}).`
+    );
+  }
+  return doc;
+}
+
+/**
+ * @param {{ dataUrl: string, fileName?: string, mimeType?: string }} payload
+ * @returns {Promise<File>}
+ */
+export async function dataUrlToFile(payload) {
+  if (!payload?.dataUrl) {
+    throw new Error("Media payload has no embedded data.");
+  }
+  const res = await fetch(payload.dataUrl);
+  const blob = await res.blob();
+  return new File(
+    [blob],
+    payload.fileName || "media",
+    { type: payload.mimeType || blob.type || "application/octet-stream" }
+  );
+}
+
 export { urlToDataPayload, cleanBgFileName, blobToDataUrl };

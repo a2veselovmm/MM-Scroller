@@ -363,7 +363,7 @@
         <summary class="collapsible-summary">Export setup</summary>
         <div class="collapsible-body">
         <p class="hint">
-          Saves every control value, text content, timeline position, and UI state as JSON. Use the same file to restore your setup later.
+          Export or import the same JSON: controls, text, timeline, UI, and optionally embedded media.
         </p>
         <label class="control-label checkbox-row">
           <input type="checkbox" id="export-setup-embed-media" checked />
@@ -371,6 +371,10 @@
         </label>
         <button type="button" id="btn-export-setup" class="btn btn-secondary btn-block">
           Export setup (JSON)
+        </button>
+        <input type="file" id="import-setup-file" accept=".json,application/json" hidden />
+        <button type="button" id="btn-import-setup" class="btn btn-secondary btn-block">
+          Import setup (JSON)
         </button>
         </div>
       </details>
