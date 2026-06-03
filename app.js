@@ -1,4 +1,6 @@
 import { initFontPicker } from "./fonts.js";
+import { createUndoManager } from "./undoHistory.js";
+import { getDesignCanvasSize } from "./canvasDesign.js";
 import { ScrollPreview } from "./preview.js";
 import { applyBgEffectsToDom } from "./backgroundEffects.js";
 import { exportRecording, downloadBlob } from "./export.js";
@@ -57,8 +59,10 @@ const state = {
   paddingH: 48,
   scrollSpeed: 80,
   startDelay: 0,
-  scrollStartY: null,
-  scrollEndY: null,
+  /** Canvas Y (px): top edge of text at timeline start. */
+  scrollFirstRow: null,
+  /** Canvas Y (px): bottom edge of text at timeline end. */
+  scrollLastRow: null,
   fitMode: "cover",
   blur: 0,
   colorOverlayEnabled: false,
@@ -69,6 +73,7 @@ const state = {
   vignetteRadiusX: 55,
   vignetteRadiusY: 55,
   vignetteSoftness: 50,
+  vignetteOpacity: 100,
   musicVolume: 100,
   musicLoop: true,
   voiceVolume: 100,
@@ -118,6 +123,158 @@ let isExporting = false;
 let isScrubbing = false;
 let lastStyledHtml = "";
 let plainOnModeEnter = "";
+let fontPickerApi = null;
+
+const undoManager = createUndoManager(captureUndoSnapshot, applyUndoSnapshot);
+
+function pushUndo() {
+  undoManager.push();
+}
+
+function performUndo() {
+  if (!undoManager.undo()) return;
+  playbackStatus.textContent = "Undone";
+}
+
+function captureUndoSnapshot() {
+  const { bgUrl, ...stateCopy } = state;
+  return {
+    state: { ...stateCopy, bgUrl },
+    lastStyledHtml: textEditor.innerHTML,
+    plainText: textPlain.value,
+    plainOnModeEnter,
+    timelineTime: engine.timelineTime,
+  };
+}
+
+function applyUndoSnapshot(snap) {
+  Object.assign(state, snap.state);
+
+  lastStyledHtml = snap.lastStyledHtml;
+  plainOnModeEnter = snap.plainOnModeEnter;
+  textPlain.value = snap.plainText;
+
+  const styled = state.editMode === "styled";
+  editModeToggle.checked = styled;
+  textEditorWrap.dataset.mode = state.editMode;
+  if (styled) {
+    textEditor.innerHTML = snap.lastStyledHtml;
+    textEditor.classList.remove("hidden");
+    textPlain.classList.add("hidden");
+    viewLabelPlain.classList.remove("is-active");
+    viewLabelStyled.classList.add("is-active");
+    editModeHint.textContent =
+      "Styled — select words and format visually. Updates preview live.";
+  } else {
+    textEditor.classList.add("hidden");
+    textPlain.classList.remove("hidden");
+    viewLabelPlain.classList.add("is-active");
+    viewLabelStyled.classList.remove("is-active");
+    editModeHint.textContent =
+      "Plain text editor only. Preview and export keep your styled text.";
+  }
+
+  applyStateToControls();
+  engine.speed = state.scrollSpeed;
+  engine.startDelay = state.startDelay;
+  engine.scrollFirstRow = state.scrollFirstRow;
+  engine.scrollLastRow = state.scrollLastRow;
+  applyBackground();
+  refreshPreview();
+  engine.applyTime(snap.timelineTime);
+  refreshDuration();
+  updatePlayPauseButton();
+  refreshToolbarFromSelection();
+}
+
+function applyStateToControls() {
+  $("aspect-ratio").value = state.aspectRatio;
+  $("fit-mode").value = state.fitMode;
+
+  $("font-size").value = String(state.fontSize);
+  $("font-size-val").textContent = `${state.fontSize}px`;
+  $("font-color").value = state.fontColor;
+  $("font-opacity").value = String(Math.round(state.fontOpacity * 100));
+  $("font-opacity-val").textContent = `${Math.round(state.fontOpacity * 100)}%`;
+
+  $("line-height").value = String(state.lineHeight);
+  $("line-height-val").textContent = String(state.lineHeight);
+  $("letter-spacing").value = String(state.letterSpacing);
+  $("letter-spacing-val").textContent = `${state.letterSpacing}px`;
+  $("padding-h").value = String(state.paddingH);
+  $("padding-h-val").textContent = `${state.paddingH}px`;
+
+  $("scroll-speed").value = String(state.scrollSpeed);
+  $("scroll-speed-val").textContent = `${state.scrollSpeed} px/s`;
+  $("start-delay").value = String(state.startDelay);
+  $("start-delay-val").textContent = `${state.startDelay}s`;
+
+  $("stroke-enabled").checked = state.strokeEnabled;
+  $("stroke-color").value = state.strokeColor;
+  $("stroke-opacity").value = String(Math.round(state.strokeOpacity * 100));
+  $("stroke-opacity-val").textContent = `${Math.round(state.strokeOpacity * 100)}%`;
+  $("stroke-width").value = String(state.strokeWidth);
+  $("stroke-width-val").textContent = `${state.strokeWidth}px`;
+
+  $("shadow-enabled").checked = state.shadowEnabled;
+  $("shadow-color").value = state.shadowColor;
+  $("shadow-opacity").value = String(Math.round(state.shadowOpacity * 100));
+  $("shadow-opacity-val").textContent = `${Math.round(state.shadowOpacity * 100)}%`;
+  $("shadow-softness").value = String(state.shadowSoftness);
+  $("shadow-softness-val").textContent = `${state.shadowSoftness}px`;
+
+  $("glow-enabled").checked = state.glowEnabled;
+  $("glow-color").value = state.glowColor;
+  $("glow-opacity").value = String(Math.round(state.glowOpacity * 100));
+  $("glow-opacity-val").textContent = `${Math.round(state.glowOpacity * 100)}%`;
+  $("glow-radius").value = String(state.glowRadius);
+  $("glow-radius-val").textContent = `${state.glowRadius}px`;
+  $("glow-sharpness").value = String(state.glowSharpness);
+  $("glow-sharpness-val").textContent = `${state.glowSharpness}px`;
+  $("glow-softness").value = String(state.glowSoftness);
+  $("glow-softness-val").textContent = String(state.glowSoftness);
+
+  $("blur").value = String(state.blur);
+  $("blur-val").textContent = `${state.blur}px`;
+
+  $("color-overlay-enabled").checked = state.colorOverlayEnabled;
+  $("color-overlay-color").value = state.colorOverlayColor;
+  $("color-overlay-opacity").value = String(state.colorOverlayOpacity);
+  $("color-overlay-opacity-val").textContent = `${state.colorOverlayOpacity}%`;
+
+  $("vignette-enabled").checked = state.vignetteEnabled;
+  $("vignette-color").value = state.vignetteColor;
+  $("vignette-radius-x").value = String(state.vignetteRadiusX);
+  $("vignette-radius-x-val").textContent = String(Math.round(state.vignetteRadiusX));
+  $("vignette-radius-y").value = String(state.vignetteRadiusY);
+  $("vignette-radius-y-val").textContent = String(Math.round(state.vignetteRadiusY));
+  $("vignette-softness").value = String(state.vignetteSoftness);
+  $("vignette-softness-val").textContent = String(Math.round(state.vignetteSoftness));
+  $("vignette-opacity").value = String(state.vignetteOpacity);
+  $("vignette-opacity-val").textContent = `${state.vignetteOpacity}%`;
+
+  $("bg-music-volume").value = String(state.musicVolume);
+  $("bg-music-volume-val").textContent = `${state.musicVolume}%`;
+  $("music-loop").checked = state.musicLoop;
+  $("bg-voice-volume").value = String(state.voiceVolume);
+  $("bg-voice-volume-val").textContent = `${state.voiceVolume}%`;
+
+  setEffectPanelEnabled("stroke-controls", state.strokeEnabled);
+  setEffectPanelEnabled("shadow-controls", state.shadowEnabled);
+  setEffectPanelEnabled("glow-controls", state.glowEnabled);
+  setEffectPanelEnabled("color-overlay-controls", state.colorOverlayEnabled);
+  setEffectPanelEnabled("vignette-controls", state.vignetteEnabled);
+
+  document.querySelectorAll("[data-align]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.align === state.textAlign);
+  });
+
+  fontPickerApi?.setFontByFamily(state.fontFamily);
+  updateScrollPositionControls();
+  applyMediaVolume(bgMusic, state.musicVolume);
+  applyMediaVolume(bgVoice, state.voiceVolume);
+  bgMusic.loop = state.musicLoop;
+}
 
 engine.onStatus = (s) => {
   playbackStatus.textContent = s;
@@ -214,13 +371,57 @@ function getStyledHtmlForPreview() {
   return defaultEditorHtml();
 }
 
-/** Push styled HTML to preview/export — never plain text */
+/** Push preview from current state (plain or styled source). */
 function syncPreviewFromStyled() {
-  const html = getStyledHtmlForPreview();
+  const html =
+    state.editMode === "plain"
+      ? plainToHtml(textPlain.value)
+      : getStyledHtmlForPreview();
   applyLayoutStyles(textEditor, textEl, getLayoutStyles());
   textEl.innerHTML = html;
   syncGlowLayer();
-  remeasureAndApply();
+  scheduleTimelineRefresh();
+}
+
+/** Apply control state to all text in styled mode when nothing is selected. */
+function applyDefaultStylesToAllText() {
+  if (state.editMode !== "styled") return;
+
+  const color = hexToRgba(state.fontColor, state.fontOpacity);
+  const fontFamily = `"${state.fontFamily}", sans-serif`;
+  const shadow = shadowStylePayload(state);
+  const stroke = strokeStylePayload(state);
+  const nodes = textEditor.querySelectorAll(".text-line, .text-run, .text-span");
+
+  for (const el of nodes) {
+    el.style.color = color;
+    el.style.fontFamily = fontFamily;
+    el.style.fontSize = `${state.fontSize}px`;
+    el.style.fontWeight = state.bold ? "700" : "400";
+    el.style.fontStyle = state.italic ? "italic" : "normal";
+    el.style.textShadow = shadow.textShadow;
+    if (stroke.webkitTextStroke) {
+      el.style.webkitTextStroke = stroke.webkitTextStroke;
+      el.style.paintOrder = stroke.paintOrder;
+    } else {
+      el.style.webkitTextStroke = "";
+      el.style.paintOrder = "";
+    }
+  }
+}
+
+/** Full preview + timeline refresh after any control change. */
+function refreshPreview() {
+  syncFromEditor();
+}
+
+/** Wait for layout after DOM text changes before measuring scroll distance. */
+function scheduleTimelineRefresh() {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      refreshTimeline({ syncScrollSliders: true });
+    });
+  });
 }
 
 function applyEffectToSelectionOrDefault(effectFn) {
@@ -228,20 +429,25 @@ function applyEffectToSelectionOrDefault(effectFn) {
     syncPreviewFromStyled();
     return false;
   }
-  if (hasSelectionIn(textEditor)) {
+  const hasSel = hasSelectionIn(textEditor);
+  if (hasSel) {
     effectFn();
-    syncFromEditor();
     updateStyleHint(true);
-    return true;
+  } else {
+    applyDefaultStylesToAllText();
+    updateStyleHint(false);
   }
-  syncFromEditor();
-  updateStyleHint(false);
-  return false;
+  refreshPreview();
+  return hasSel;
 }
 
 function syncFromEditor() {
   if (state.editMode === "plain") {
-    syncPreviewFromStyled();
+    const html = plainToHtml(textPlain.value);
+    applyLayoutStyles(textEditor, textEl, getLayoutStyles());
+    textEl.innerHTML = html;
+    syncGlowLayer();
+    scheduleTimelineRefresh();
     return;
   }
 
@@ -249,11 +455,12 @@ function syncFromEditor() {
   applyLayoutStyles(textEditor, textEl, getLayoutStyles());
   syncEditorToPreview(textEditor, textEl);
   syncGlowLayer();
-  remeasureAndApply();
+  scheduleTimelineRefresh();
 }
 
 function setEditMode(mode) {
   if (mode === state.editMode) return;
+  if (!undoManager.isRestoring()) pushUndo();
 
   if (mode === "plain") {
     lastStyledHtml = textEditor.innerHTML;
@@ -298,17 +505,16 @@ function applyToSelectionOrDefault(styleFn) {
     return false;
   }
 
-  if (hasSelectionIn(textEditor)) {
+  const hasSel = hasSelectionIn(textEditor);
+  if (hasSel) {
     styleFn();
-    syncFromEditor();
     updateStyleHint(true);
-    return true;
+  } else {
+    applyDefaultStylesToAllText();
+    updateStyleHint(false);
   }
-  applyLayoutStyles(textEditor, textEl, getLayoutStyles());
-  syncEditorToPreview(textEditor, textEl);
-  remeasureAndApply();
-  updateStyleHint(false);
-  return false;
+  refreshPreview();
+  return hasSel;
 }
 
 function updateStyleHint(hasSelection) {
@@ -385,9 +591,13 @@ function formatTime(seconds) {
 
 /** Recompute scroll range, preview frame, scrubber max, and time labels. */
 function refreshTimeline({ syncScrollSliders = false } = {}) {
+  syncEngineDesignSpace();
   if (syncScrollSliders) {
     updateScrollPositionControls();
   } else {
+    migrateScrollRowSettings();
+    engine.scrollFirstRow = state.scrollFirstRow;
+    engine.scrollLastRow = state.scrollLastRow;
     engine.measure();
   }
 
@@ -459,6 +669,7 @@ function clearVoiceover() {
 }
 
 function loadMusic(file) {
+  if (!undoManager.isRestoring()) pushUndo();
   clearMusic();
   const url = URL.createObjectURL(file);
   bgMusicObjectUrl = url;
@@ -476,6 +687,7 @@ function loadMusic(file) {
 }
 
 function loadVoiceover(file) {
+  if (!undoManager.isRestoring()) pushUndo();
   clearVoiceover();
   const url = URL.createObjectURL(file);
   bgVoiceObjectUrl = url;
@@ -493,53 +705,81 @@ function loadVoiceover(file) {
   );
 }
 
+function syncEngineDesignSpace() {
+  const { width, height } = getDesignCanvasSize(state.aspectRatio);
+  engine.designWidth = width;
+  engine.designHeight = height;
+}
+
+/** Logical canvas height in px (e.g. 1920 for 9:16). */
+function getCanvasScrollHeight() {
+  return getDesignCanvasSize(state.aspectRatio).height;
+}
+
+function getPreviewDisplayScale() {
+  const ch = canvas.clientHeight || textContainer.clientHeight || 1;
+  const dh = getCanvasScrollHeight();
+  return ch / dh;
+}
+
+function migrateScrollRowSettings() {
+  const designH = getCanvasScrollHeight();
+  const scale = getPreviewDisplayScale();
+  const thDisplay = Math.max(textEl.offsetHeight, 1);
+
+  if (state.scrollFirstRow == null) {
+    if (state.scrollStartY != null) {
+      state.scrollFirstRow = Math.round(state.scrollStartY / scale);
+    } else {
+      state.scrollFirstRow = designH;
+    }
+  }
+  if (state.scrollLastRow == null) {
+    if (state.scrollEndY != null) {
+      state.scrollLastRow = Math.round((state.scrollEndY + thDisplay) / scale);
+    } else {
+      state.scrollLastRow = 0;
+    }
+  }
+}
+
 function updateScrollPositionControls() {
-  const ch = textContainer.clientHeight || 400;
-  const th = Math.max(textEl.offsetHeight, 1);
+  syncEngineDesignSpace();
+  const ch = getCanvasScrollHeight();
   const startSlider = $("scroll-start");
   const endSlider = $("scroll-end");
 
-  const minY = -Math.round(th * 1.5);
-  const maxY = Math.max(200, ch + Math.round(th * 0.5));
+  migrateScrollRowSettings();
 
-  startSlider.min = String(minY);
-  startSlider.max = String(maxY);
-  endSlider.min = String(minY);
-  endSlider.max = String(maxY);
+  startSlider.min = "0";
+  startSlider.max = String(ch);
+  endSlider.min = "0";
+  endSlider.max = String(ch);
 
-  if (state.scrollStartY == null) {
-    state.scrollStartY = ch;
-  }
-  if (state.scrollEndY == null) {
-    state.scrollEndY = -th;
-  }
+  state.scrollFirstRow = Math.min(ch, Math.max(0, Math.round(state.scrollFirstRow)));
+  state.scrollLastRow = Math.min(ch, Math.max(0, Math.round(state.scrollLastRow)));
 
-  state.scrollStartY = Math.min(maxY, Math.max(minY, Math.round(state.scrollStartY)));
-  state.scrollEndY = Math.min(maxY, Math.max(minY, Math.round(state.scrollEndY)));
+  engine.scrollFirstRow = state.scrollFirstRow;
+  engine.scrollLastRow = state.scrollLastRow;
 
-  const minScroll = 8;
-  if (state.scrollEndY >= state.scrollStartY - minScroll) {
-    state.scrollEndY = state.scrollStartY - minScroll;
-  }
-
-  engine.scrollStartY = state.scrollStartY;
-  engine.scrollEndY = state.scrollEndY;
-
-  startSlider.value = String(state.scrollStartY);
-  endSlider.value = String(state.scrollEndY);
-  $("scroll-start-val").textContent = `${state.scrollStartY}px`;
-  $("scroll-end-val").textContent = `${state.scrollEndY}px`;
+  startSlider.value = String(state.scrollFirstRow);
+  endSlider.value = String(state.scrollLastRow);
+  $("scroll-start-val").textContent = `${state.scrollFirstRow}px`;
+  $("scroll-end-val").textContent = `${state.scrollLastRow}px`;
 
   engine.measure();
 }
 
 function remeasureAndApply() {
-  refreshTimeline({ syncScrollSliders: true });
+  scheduleTimelineRefresh();
 }
 
 function bindRange(id, valId, format, onChange) {
   const input = $(id);
   const val = $(valId);
+  input.addEventListener("pointerdown", () => {
+    if (!undoManager.isRestoring()) pushUndo();
+  });
   const update = () => {
     const v = input.type === "range" ? parseFloat(input.value) : input.value;
     if (val) val.textContent = format(v);
@@ -547,6 +787,14 @@ function bindRange(id, valId, format, onChange) {
   };
   input.addEventListener("input", update);
   update();
+}
+
+function bindColorInput(id, onChange) {
+  const input = $(id);
+  input.addEventListener("pointerdown", () => {
+    if (!undoManager.isRestoring()) pushUndo();
+  });
+  input.addEventListener("input", onChange);
 }
 
 function applyBgEffects() {
@@ -558,10 +806,12 @@ function applyBgEffects() {
     vignetteRadiusX: state.vignetteRadiusX,
     vignetteRadiusY: state.vignetteRadiusY,
     vignetteSoftness: state.vignetteSoftness,
+    vignetteOpacity: state.vignetteOpacity,
     colorOverlayEnabled: state.colorOverlayEnabled,
     colorOverlayColor: state.colorOverlayColor,
     colorOverlayOpacity: state.colorOverlayOpacity,
   });
+  engine.applyTime(engine.timelineTime);
 }
 
 function applyBackground() {
@@ -574,6 +824,7 @@ function applyBackground() {
   overlayLayer.style.backdropFilter = state.blur > 0 ? `blur(${state.blur}px)` : "none";
 
   applyBgEffects();
+  engine.applyTime(engine.timelineTime);
 }
 
 function setAspectRatio(ratio) {
@@ -599,6 +850,7 @@ async function loadBackground(file) {
     return;
   }
 
+  if (!undoManager.isRestoring()) pushUndo();
   clearBackground();
   const url = URL.createObjectURL(file);
   bgObjectUrl = url;
@@ -623,9 +875,14 @@ function initEditor() {
     "Type your scrolling text… Select words to style them.";
   textEditorWrap.dataset.mode = "styled";
 
+  textEditor.addEventListener("beforeinput", () => {
+    if (!undoManager.isRestoring()) undoManager.noteTypingStart();
+  });
+
   textEditor.addEventListener("input", () => {
     lastStyledHtml = textEditor.innerHTML;
     syncFromEditor();
+    undoManager.noteTypingEnd();
   });
 
   textEditor.addEventListener("keyup", refreshToolbarFromSelection);
@@ -641,12 +898,25 @@ function initEditor() {
   });
 
   textEditor.addEventListener("paste", (e) => {
+    if (!undoManager.isRestoring()) pushUndo();
     e.preventDefault();
     const text = e.clipboardData.getData("text/plain");
     document.execCommand("insertText", false, text);
+    requestAnimationFrame(() => syncFromEditor());
   });
 
-  // Plain edits do not update preview — preview stays on lastStyledHtml
+  const onPlainTextBeforeInput = () => {
+    if (!undoManager.isRestoring()) undoManager.noteTypingStart();
+  };
+  const onPlainTextChange = () => {
+    syncFromEditor();
+    undoManager.noteTypingEnd();
+  };
+  textPlain.addEventListener("beforeinput", onPlainTextBeforeInput);
+  textPlain.addEventListener("input", onPlainTextChange);
+  textPlain.addEventListener("paste", () => {
+    if (!undoManager.isRestoring()) pushUndo();
+  });
 
   editModeToggle.addEventListener("change", () => {
     setEditMode(editModeToggle.checked ? "styled" : "plain");
@@ -658,14 +928,26 @@ function initAlignButtons() {
     btn.addEventListener("click", () => {
       document.querySelectorAll("[data-align]").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
+      if (!undoManager.isRestoring()) pushUndo();
       state.textAlign = btn.dataset.align;
-      syncFromEditor();
+      refreshPreview();
     });
   });
 }
 
+function initUndo() {
+  document.addEventListener("keydown", (e) => {
+    if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" || e.shiftKey) {
+      return;
+    }
+    e.preventDefault();
+    performUndo();
+  });
+}
+
 function initControls() {
-  initFontPicker($("font-picker"), (font) => {
+  fontPickerApi = initFontPicker($("font-picker"), (font) => {
+    if (!undoManager.isRestoring()) pushUndo();
     state.fontFamily = font.family.replace(/\+/g, " ");
     applyToSelectionOrDefault(() => {
       applyStyleToSelection(textEditor, {
@@ -681,7 +963,7 @@ function initControls() {
     });
   });
 
-  $("font-color").addEventListener("input", (e) => {
+  bindColorInput("font-color", (e) => {
     state.fontColor = e.target.value;
     applyToSelectionOrDefault(() => {
       applyStyleToSelection(textEditor, {
@@ -701,42 +983,57 @@ function initControls() {
   });
 
   $("btn-bold").addEventListener("click", () => {
-    if (state.editMode !== "styled") return;
+    if (!undoManager.isRestoring()) pushUndo();
+    if (state.editMode !== "styled") {
+      syncPreviewFromStyled();
+      return;
+    }
     const selStyle = getSelectionStyles(textEditor);
     const turnOn = selStyle?.bold !== true;
     if (hasSelectionIn(textEditor)) {
       applyStyleToSelection(textEditor, {
         fontWeight: turnOn ? "700" : "400",
       });
-      syncFromEditor();
-      refreshToolbarFromSelection();
+    } else {
+      state.bold = turnOn;
+      applyDefaultStylesToAllText();
     }
+    refreshPreview();
+    refreshToolbarFromSelection();
   });
 
   $("btn-italic").addEventListener("click", () => {
-    if (state.editMode !== "styled") return;
+    if (!undoManager.isRestoring()) pushUndo();
+    if (state.editMode !== "styled") {
+      syncPreviewFromStyled();
+      return;
+    }
     const selStyle = getSelectionStyles(textEditor);
     const turnOn = selStyle?.italic !== true;
     if (hasSelectionIn(textEditor)) {
       applyStyleToSelection(textEditor, {
         fontStyle: turnOn ? "italic" : "normal",
       });
-      syncFromEditor();
-      refreshToolbarFromSelection();
+    } else {
+      state.italic = turnOn;
+      applyDefaultStylesToAllText();
     }
+    refreshPreview();
+    refreshToolbarFromSelection();
   });
 
   bindRange("line-height", "line-height-val", (v) => String(v), (v) => {
     state.lineHeight = v;
-    syncFromEditor();
+    refreshPreview();
   });
 
   bindRange("letter-spacing", "letter-spacing-val", (v) => `${v}px`, (v) => {
     state.letterSpacing = v;
-    syncFromEditor();
+    refreshPreview();
   });
 
   $("stroke-enabled").addEventListener("change", (e) => {
+    if (!undoManager.isRestoring()) pushUndo();
     state.strokeEnabled = e.target.checked;
     setEffectPanelEnabled("stroke-controls", state.strokeEnabled);
     applyEffectToSelectionOrDefault(() => {
@@ -744,7 +1041,7 @@ function initControls() {
     });
   });
 
-  $("stroke-color").addEventListener("input", (e) => {
+  bindColorInput("stroke-color", (e) => {
     state.strokeColor = e.target.value;
     applyEffectToSelectionOrDefault(() => {
       applyStyleToSelection(textEditor, strokeStylePayload(state));
@@ -766,6 +1063,7 @@ function initControls() {
   });
 
   $("shadow-enabled").addEventListener("change", (e) => {
+    if (!undoManager.isRestoring()) pushUndo();
     state.shadowEnabled = e.target.checked;
     setEffectPanelEnabled("shadow-controls", state.shadowEnabled);
     applyEffectToSelectionOrDefault(() => {
@@ -773,7 +1071,7 @@ function initControls() {
     });
   });
 
-  $("shadow-color").addEventListener("input", (e) => {
+  bindColorInput("shadow-color", (e) => {
     state.shadowColor = e.target.value;
     applyEffectToSelectionOrDefault(() => {
       applyStyleToSelection(textEditor, shadowStylePayload(state));
@@ -795,39 +1093,40 @@ function initControls() {
   });
 
   $("glow-enabled").addEventListener("change", (e) => {
+    if (!undoManager.isRestoring()) pushUndo();
     state.glowEnabled = e.target.checked;
     setEffectPanelEnabled("glow-controls", state.glowEnabled);
-    syncFromEditor();
+    refreshPreview();
   });
 
-  $("glow-color").addEventListener("input", (e) => {
+  bindColorInput("glow-color", (e) => {
     state.glowColor = e.target.value;
-    syncFromEditor();
+    refreshPreview();
   });
 
   bindRange("glow-opacity", "glow-opacity-val", (v) => `${v}%`, (v) => {
     state.glowOpacity = v / 100;
-    syncFromEditor();
+    refreshPreview();
   });
 
   bindRange("glow-radius", "glow-radius-val", (v) => `${v}px`, (v) => {
     state.glowRadius = v;
-    syncFromEditor();
+    refreshPreview();
   });
 
   bindRange("glow-sharpness", "glow-sharpness-val", (v) => `${v}px`, (v) => {
     state.glowSharpness = v;
-    syncFromEditor();
+    refreshPreview();
   });
 
   bindRange("glow-softness", "glow-softness-val", (v) => String(v), (v) => {
     state.glowSoftness = v;
-    syncFromEditor();
+    refreshPreview();
   });
 
   bindRange("padding-h", "padding-h-val", (v) => `${v}px`, (v) => {
     state.paddingH = v;
-    syncFromEditor();
+    refreshPreview();
   });
 
   bindRange("scroll-speed", "scroll-speed-val", (v) => `${v} px/s`, (v) => {
@@ -843,16 +1142,17 @@ function initControls() {
   });
 
   bindRange("scroll-start", "scroll-start-val", (v) => `${v}px`, (v) => {
-    state.scrollStartY = v;
+    state.scrollFirstRow = v;
     refreshTimeline({ syncScrollSliders: true });
   });
 
   bindRange("scroll-end", "scroll-end-val", (v) => `${v}px`, (v) => {
-    state.scrollEndY = v;
+    state.scrollLastRow = v;
     refreshTimeline({ syncScrollSliders: true });
   });
 
   $("fit-mode").addEventListener("change", (e) => {
+    if (!undoManager.isRestoring()) pushUndo();
     state.fitMode = e.target.value;
     applyBackground();
   });
@@ -863,12 +1163,13 @@ function initControls() {
   });
 
   $("color-overlay-enabled").addEventListener("change", (e) => {
+    if (!undoManager.isRestoring()) pushUndo();
     state.colorOverlayEnabled = e.target.checked;
     setEffectPanelEnabled("color-overlay-controls", state.colorOverlayEnabled);
     applyBgEffects();
   });
 
-  $("color-overlay-color").addEventListener("input", (e) => {
+  bindColorInput("color-overlay-color", (e) => {
     state.colorOverlayColor = e.target.value;
     applyBgEffects();
   });
@@ -879,12 +1180,13 @@ function initControls() {
   });
 
   $("vignette-enabled").addEventListener("change", (e) => {
+    if (!undoManager.isRestoring()) pushUndo();
     state.vignetteEnabled = e.target.checked;
     setEffectPanelEnabled("vignette-controls", state.vignetteEnabled);
     applyBgEffects();
   });
 
-  $("vignette-color").addEventListener("input", (e) => {
+  bindColorInput("vignette-color", (e) => {
     state.vignetteColor = e.target.value;
     applyBgEffects();
   });
@@ -904,12 +1206,21 @@ function initControls() {
     applyBgEffects();
   });
 
+  bindRange("vignette-opacity", "vignette-opacity-val", (v) => `${v}%`, (v) => {
+    state.vignetteOpacity = v;
+    applyBgEffects();
+  });
+
   bindRange("bg-music-volume", "bg-music-volume-val", (v) => `${v}%`, (v) => {
     state.musicVolume = v;
     applyMediaVolume(bgMusic, state.musicVolume);
+    syncTimelineAudio(engine.timelineTime, {
+      isPlaying: engine.running && !engine.paused,
+    });
   });
 
   $("music-loop").addEventListener("change", (e) => {
+    if (!undoManager.isRestoring()) pushUndo();
     state.musicLoop = e.target.checked;
     applyMusicLoop();
   });
@@ -917,6 +1228,9 @@ function initControls() {
   bindRange("bg-voice-volume", "bg-voice-volume-val", (v) => `${v}%`, (v) => {
     state.voiceVolume = v;
     applyMediaVolume(bgVoice, state.voiceVolume);
+    syncTimelineAudio(engine.timelineTime, {
+      isPlaying: engine.running && !engine.paused,
+    });
   });
 
   $("bg-music-upload").addEventListener("change", (e) => {
@@ -930,11 +1244,14 @@ function initControls() {
   });
 
   $("aspect-ratio").addEventListener("change", (e) => {
+    if (!undoManager.isRestoring()) pushUndo();
     state.aspectRatio = e.target.value;
     setAspectRatio(state.aspectRatio);
+    syncEngineDesignSpace();
     requestAnimationFrame(() => {
-      remeasureAndApply();
+      updateScrollPositionControls();
       applyBgEffects();
+      refreshPreview();
     });
   });
 
@@ -1072,8 +1389,8 @@ async function runExport() {
     pauseTimelineAudio();
     engine.speed = state.scrollSpeed;
     engine.startDelay = state.startDelay;
-    engine.scrollStartY = state.scrollStartY;
-    engine.scrollEndY = state.scrollEndY;
+    engine.scrollFirstRow = state.scrollFirstRow;
+    engine.scrollLastRow = state.scrollLastRow;
     if (document.fonts?.ready) {
       await document.fonts.ready;
     }
@@ -1127,8 +1444,8 @@ function serializeSettings() {
   const { bgUrl: _bgUrl, ...settings } = state;
   return {
     ...settings,
-    scrollStartY: state.scrollStartY,
-    scrollEndY: state.scrollEndY,
+    scrollFirstRow: state.scrollFirstRow,
+    scrollLastRow: state.scrollLastRow,
   };
 }
 
@@ -1145,8 +1462,8 @@ function serializeTimelineState() {
     position: engine.timelineTime,
     speed: engine.speed,
     startDelay: engine.startDelay,
-    scrollStartY: engine.scrollStartY,
-    scrollEndY: engine.scrollEndY,
+    scrollFirstRow: engine.scrollFirstRow,
+    scrollLastRow: engine.scrollLastRow,
   };
 }
 
@@ -1354,6 +1671,7 @@ function initControlTabs() {
 
 function init() {
   initEditor();
+  initUndo();
   initAlignButtons();
   initControls();
   initControlTabs();
@@ -1367,6 +1685,7 @@ function init() {
   initTransport();
   initExport();
   setAspectRatio(state.aspectRatio);
+  syncEngineDesignSpace();
   syncFromEditor();
   applyBackground();
   engine.speed = state.scrollSpeed;
@@ -1384,7 +1703,8 @@ function init() {
   setEffectPanelEnabled("vignette-controls", state.vignetteEnabled);
 
   window.addEventListener("resize", () => {
-    remeasureAndApply();
+    updateScrollPositionControls();
+    refreshTimeline();
     applyBgEffects();
   });
 }

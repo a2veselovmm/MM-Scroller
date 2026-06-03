@@ -8,10 +8,13 @@ export class ScrollPreview {
     this.container = container;
     this.speed = 80;
     this.startDelay = 0;
-    /** Starting translateY in px (null = bottom of canvas / container height) */
-    this.scrollStartY = null;
-    /** Ending translateY in px (null = text scrolled fully above view, -textHeight) */
-    this.scrollEndY = null;
+    /** Canvas Y (px): text top edge at timeline start (null = canvas height). */
+    this.scrollFirstRow = null;
+    /** Canvas Y (px): text bottom edge at timeline end (null = 0). */
+    this.scrollLastRow = null;
+    /** Logical canvas height (px); scroll settings use this coordinate system. */
+    this.designHeight = 1920;
+    this.displayScale = 1;
     this.running = false;
     this.paused = false;
     this.y = 0;
@@ -27,13 +30,22 @@ export class ScrollPreview {
   }
 
   measure() {
-    const ch = this.container.clientHeight;
-    const th = Math.max(this.textEl.offsetHeight, 1);
-    this.containerHeight = ch;
+    const ch = this.container.clientHeight || 1;
+    const dh = this.designHeight || ch;
+    this.displayScale = ch / dh;
+    const thDisplay = Math.max(this.textEl.offsetHeight, 1);
+    const th = Math.max(thDisplay / this.displayScale, 1);
+    this.containerHeight = dh;
     this.textHeight = th;
-    this.startY =
-      this.scrollStartY != null ? this.scrollStartY : ch;
-    this.endY = this.scrollEndY != null ? this.scrollEndY : -th;
+    const firstRow = this.scrollFirstRow != null ? this.scrollFirstRow : dh;
+    const lastRow = this.scrollLastRow != null ? this.scrollLastRow : 0;
+    this.startY = firstRow;
+    this.endY = lastRow - th;
+  }
+
+  /** Timeline Y in design px → CSS translateY for the on-screen preview. */
+  getDisplayY(designY = this.y) {
+    return designY * this.displayScale;
   }
 
   getScrollDuration() {
@@ -66,7 +78,7 @@ export class ScrollPreview {
   }
 
   applyTransform() {
-    this.textEl.style.transform = `translateY(${this.y}px)`;
+    this.textEl.style.transform = `translateY(${this.getDisplayY()}px)`;
   }
 
   seek(time) {

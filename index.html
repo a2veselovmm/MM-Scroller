@@ -160,16 +160,16 @@
           <input type="range" id="start-delay" min="0" max="10" step="0.5" value="0" />
 
           <label class="control-label" for="scroll-start">
-            Scroll position at start <span id="scroll-start-val" class="value-badge">—</span>
+            Top edge at start <span id="scroll-start-val" class="value-badge">—</span>
           </label>
-          <input type="range" id="scroll-start" min="0" max="800" value="400" />
-          <p class="hint">Vertical position (px) of text on the first frame. Higher = lower on screen.</p>
+          <input type="range" id="scroll-start" min="0" max="1920" value="1920" step="1" />
+          <p class="hint">Y in output canvas pixels (e.g. 0–1920 tall for 9:16). Top edge on the first frame; preview scales to fit the panel.</p>
 
           <label class="control-label" for="scroll-end">
-            Scroll position at end <span id="scroll-end-val" class="value-badge">—</span>
+            Bottom edge at end <span id="scroll-end-val" class="value-badge">—</span>
           </label>
-          <input type="range" id="scroll-end" min="-800" max="800" value="-100" />
-          <p class="hint">Vertical position (px) of text on the last frame. Lower = last line higher on screen.</p>
+          <input type="range" id="scroll-end" min="0" max="1920" value="0" step="1" />
+          <p class="hint">Y position (px from top of canvas) of the text layer’s bottom edge on the last frame. Independent of the start setting; longer text increases scroll time, not this value.</p>
         </div>
       </details>
 
@@ -285,6 +285,10 @@
           <div class="control-row">
             <label class="control-label" for="vignette-color">Color</label>
             <input type="color" id="vignette-color" value="#000000" />
+            <label class="control-label inline" for="vignette-opacity">
+              Opacity <span id="vignette-opacity-val" class="value-badge">100%</span>
+            </label>
+            <input type="range" id="vignette-opacity" min="0" max="100" value="100" />
           </div>
           <label class="control-label" for="vignette-radius-x">
             Radius X <span id="vignette-radius-x-val" class="value-badge">55</span>

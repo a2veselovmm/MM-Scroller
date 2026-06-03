@@ -416,7 +416,7 @@ function buildTextLayerCaches(textContent, w, glowState) {
 function compositeFrame(
   ctx,
   ty,
-  { bgCache, textCanvas, glowCanvas, glowState, w, h, ew, eh, drawScale }
+  { bgCache, textCanvas, glowCanvas, glowState, w, h, ew, eh, drawScale, designHeight }
 ) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(bgCache, 0, 0);
@@ -427,15 +427,18 @@ function compositeFrame(
   ctx.rect(0, 0, w, h);
   ctx.clip();
 
+  const designH = designHeight || h;
+  const tyLayout = ty * (h / designH);
+
   if (glowCanvas && glowState?.enabled) {
     ctx.save();
     ctx.filter = `blur(${glowState.sharpness}px)`;
-    ctx.drawImage(glowCanvas, 0, ty);
+    ctx.drawImage(glowCanvas, 0, tyLayout);
     ctx.restore();
   }
 
   if (textCanvas) {
-    ctx.drawImage(textCanvas, 0, ty);
+    ctx.drawImage(textCanvas, 0, tyLayout);
   }
 
   ctx.restore();
@@ -491,7 +494,16 @@ export async function exportRecording(canvasEl, engine, hooks = {}) {
     ? buildTextLayerCaches(textContent, w, glowState)
     : { textCanvas: null, glowCanvas: null, glowState };
 
-  const layerBundle = { bgCache, ...textLayers, w, h, ew, eh, drawScale };
+  const layerBundle = {
+    bgCache,
+    ...textLayers,
+    w,
+    h,
+    ew,
+    eh,
+    drawScale,
+    designHeight: engine.designHeight || h,
+  };
   const frameCount = Math.max(1, Math.ceil(totalDuration * FPS));
 
   return encodeFrameSequence({

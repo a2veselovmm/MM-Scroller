@@ -14,6 +14,10 @@ export function vignetteRadiiPercent(effects) {
 }
 
 /** Inner gradient stop (%) — uses the smaller axis; higher softness = softer edge. */
+export function vignetteOpacityAlpha(effects) {
+  return Math.max(0, Math.min(1, (effects.vignetteOpacity ?? 100) / 100));
+}
+
 export function vignetteInnerStopPercent(rx, ry, softnessPct) {
   const radius = Math.min(rx, ry);
   const softness = Math.max(0, Math.min(100, softnessPct)) / 100;
@@ -27,7 +31,7 @@ export function vignetteCssBackground(effects) {
     ry,
     effects.vignetteSoftness
   );
-  const color = hexToRgba(effects.vignetteColor, 1);
+  const color = hexToRgba(effects.vignetteColor, vignetteOpacityAlpha(effects));
   return `radial-gradient(ellipse ${rx}% ${ry}% at 50% 50%, transparent ${inner}%, ${color} 100%)`;
 }
 
@@ -37,7 +41,7 @@ export function drawVignette(ctx, w, h, effects) {
   const { rx, ry } = vignetteRadiiPercent(effects);
   const innerFrac =
     vignetteInnerStopPercent(rx, ry, effects.vignetteSoftness) / 100;
-  const color = hexToRgba(effects.vignetteColor, 1);
+  const color = hexToRgba(effects.vignetteColor, vignetteOpacityAlpha(effects));
   const maxExtent = Math.max(w, h);
   const rxPx = (rx / 100) * w * 0.5;
   const ryPx = (ry / 100) * h * 0.5;
@@ -74,6 +78,7 @@ export function readBgEffectsFromCanvas(canvasEl) {
     vignetteRadiusX: parseFloat(v?.dataset.radiusX ?? "55"),
     vignetteRadiusY: parseFloat(v?.dataset.radiusY ?? "55"),
     vignetteSoftness: parseFloat(v?.dataset.softness ?? "50"),
+    vignetteOpacity: parseFloat(v?.dataset.opacity ?? "100"),
     colorOverlayEnabled: o?.dataset.enabled === "1",
     colorOverlayColor: o?.dataset.color || "#000000",
     colorOverlayOpacity: parseFloat(o?.dataset.opacity ?? "40"),
@@ -93,6 +98,7 @@ export function applyBgEffectsToDom(vignetteEl, overlayEl, w, h, effects) {
     vignetteEl.dataset.radiusX = String(effects.vignetteRadiusX);
     vignetteEl.dataset.radiusY = String(effects.vignetteRadiusY);
     vignetteEl.dataset.softness = String(effects.vignetteSoftness);
+    vignetteEl.dataset.opacity = String(effects.vignetteOpacity ?? 100);
     vignetteEl.style.background = vignetteCssBackground(effects);
     vignetteEl.classList.remove("hidden");
   } else {

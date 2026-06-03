@@ -49,6 +49,21 @@ export function fontDisplayName(font) {
   return font.family.replace(/\+/g, " ");
 }
 
+export function findFontByFamily(familyName) {
+  const primary = String(familyName || "")
+    .replace(/['"]/g, "")
+    .split(",")[0]
+    .trim()
+    .toLowerCase();
+  return (
+    CURATED_FONTS.find(
+      (f) =>
+        fontDisplayName(f).toLowerCase() === primary ||
+        f.name.toLowerCase() === primary
+    ) || null
+  );
+}
+
 export function fontCssFamily(font) {
   const name = fontDisplayName(font);
   const fb = FALLBACK[font.category] || "sans-serif";
@@ -231,4 +246,11 @@ export function initFontPicker(container, onChange) {
       setSelected(CURATED_FONTS[0]);
       onChange(CURATED_FONTS[0]);
     });
+
+  return {
+    setFontByFamily(familyName) {
+      const font = findFontByFamily(familyName);
+      if (font) setSelected(font);
+    },
+  };
 }
