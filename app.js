@@ -58,6 +58,7 @@ const state = {
   scrollSpeed: 80,
   startDelay: 0,
   scrollStartY: null,
+  scrollEndY: null,
   fitMode: "cover",
   blur: 0,
   colorOverlayEnabled: false,
@@ -382,18 +383,31 @@ function formatTime(seconds) {
   return m > 0 ? `${m}:${sec.padStart(4, "0")}` : `0:${sec.padStart(4, "0")}`;
 }
 
-function refreshDuration() {
-  engine.measure();
+/** Recompute scroll range, preview frame, scrubber max, and time labels. */
+function refreshTimeline({ syncScrollSliders = false } = {}) {
+  if (syncScrollSliders) {
+    updateScrollPositionControls();
+  } else {
+    engine.measure();
+  }
+
   const total = engine.getTotalDuration();
+  const t = Math.min(engine.timelineTime, total);
+  engine.applyTime(t);
+
   const max = Math.max(1, Math.round(total * 10));
   timelineScrub.max = String(max);
-  timelineScrub.value = String(Math.round(engine.timelineTime * 10));
-  updateTimelineUI(engine.timelineTime, total);
+  timelineScrub.value = String(Math.round(t * 10));
+  updateTimelineUI(t, total, true);
   return total;
 }
 
-function updateTimelineUI(current, total) {
-  if (isScrubbing) return;
+function refreshDuration() {
+  return refreshTimeline();
+}
+
+function updateTimelineUI(current, total, force = false) {
+  if (isScrubbing && !force) return;
   timeCurrent.textContent = formatTime(current);
   timeTotal.textContent = formatTime(total);
   timelineScrub.value = String(Math.round(current * 10));
@@ -479,34 +493,48 @@ function loadVoiceover(file) {
   );
 }
 
-function updateScrollStartControl() {
-  engine.measure();
-  const ch = engine.containerHeight || textContainer.clientHeight || 400;
-  const th = engine.textHeight || textEl.offsetHeight || 100;
-  const slider = $("scroll-start");
+function updateScrollPositionControls() {
+  const ch = textContainer.clientHeight || 400;
+  const th = Math.max(textEl.offsetHeight, 1);
+  const startSlider = $("scroll-start");
+  const endSlider = $("scroll-end");
 
-  slider.min = String(-Math.round(th));
-  slider.max = String(Math.max(200, ch + Math.round(th * 0.5)));
+  const minY = -Math.round(th * 1.5);
+  const maxY = Math.max(200, ch + Math.round(th * 0.5));
+
+  startSlider.min = String(minY);
+  startSlider.max = String(maxY);
+  endSlider.min = String(minY);
+  endSlider.max = String(maxY);
 
   if (state.scrollStartY == null) {
     state.scrollStartY = ch;
   }
+  if (state.scrollEndY == null) {
+    state.scrollEndY = -th;
+  }
 
-  const min = parseInt(slider.min, 10);
-  const max = parseInt(slider.max, 10);
-  state.scrollStartY = Math.min(max, Math.max(min, Math.round(state.scrollStartY)));
+  state.scrollStartY = Math.min(maxY, Math.max(minY, Math.round(state.scrollStartY)));
+  state.scrollEndY = Math.min(maxY, Math.max(minY, Math.round(state.scrollEndY)));
+
+  const minScroll = 8;
+  if (state.scrollEndY >= state.scrollStartY - minScroll) {
+    state.scrollEndY = state.scrollStartY - minScroll;
+  }
+
   engine.scrollStartY = state.scrollStartY;
+  engine.scrollEndY = state.scrollEndY;
 
-  slider.value = String(state.scrollStartY);
+  startSlider.value = String(state.scrollStartY);
+  endSlider.value = String(state.scrollEndY);
   $("scroll-start-val").textContent = `${state.scrollStartY}px`;
+  $("scroll-end-val").textContent = `${state.scrollEndY}px`;
 
   engine.measure();
 }
 
 function remeasureAndApply() {
-  updateScrollStartControl();
-  engine.applyTime(engine.timelineTime);
-  refreshDuration();
+  refreshTimeline({ syncScrollSliders: true });
 }
 
 function bindRange(id, valId, format, onChange) {
@@ -805,24 +833,23 @@ function initControls() {
   bindRange("scroll-speed", "scroll-speed-val", (v) => `${v} px/s`, (v) => {
     state.scrollSpeed = v;
     engine.speed = v;
-    refreshDuration();
-    engine.applyTime(engine.timelineTime);
+    refreshTimeline();
   });
 
   bindRange("start-delay", "start-delay-val", (v) => `${v}s`, (v) => {
     state.startDelay = v;
     engine.startDelay = v;
-    refreshDuration();
-    engine.applyTime(engine.timelineTime);
+    refreshTimeline();
   });
 
   bindRange("scroll-start", "scroll-start-val", (v) => `${v}px`, (v) => {
     state.scrollStartY = v;
-    engine.scrollStartY = v;
-    engine.measure();
-    engine.applyTime(engine.timelineTime);
-    syncGlowLayer();
-    refreshDuration();
+    refreshTimeline({ syncScrollSliders: true });
+  });
+
+  bindRange("scroll-end", "scroll-end-val", (v) => `${v}px`, (v) => {
+    state.scrollEndY = v;
+    refreshTimeline({ syncScrollSliders: true });
   });
 
   $("fit-mode").addEventListener("change", (e) => {
@@ -1046,10 +1073,11 @@ async function runExport() {
     engine.speed = state.scrollSpeed;
     engine.startDelay = state.startDelay;
     engine.scrollStartY = state.scrollStartY;
+    engine.scrollEndY = state.scrollEndY;
     if (document.fonts?.ready) {
       await document.fonts.ready;
     }
-    updateScrollStartControl();
+    updateScrollPositionControls();
     engine.reset();
 
     progressLabel.textContent = "Preparing export…";
@@ -1100,6 +1128,7 @@ function serializeSettings() {
   return {
     ...settings,
     scrollStartY: state.scrollStartY,
+    scrollEndY: state.scrollEndY,
   };
 }
 
@@ -1117,6 +1146,7 @@ function serializeTimelineState() {
     speed: engine.speed,
     startDelay: engine.startDelay,
     scrollStartY: engine.scrollStartY,
+    scrollEndY: engine.scrollEndY,
   };
 }
 
@@ -1341,7 +1371,7 @@ function init() {
   applyBackground();
   engine.speed = state.scrollSpeed;
   engine.startDelay = state.startDelay;
-  updateScrollStartControl();
+  updateScrollPositionControls();
   engine.applyTime(0);
   refreshDuration();
   updatePlayPauseButton();

@@ -10,6 +10,8 @@ export class ScrollPreview {
     this.startDelay = 0;
     /** Starting translateY in px (null = bottom of canvas / container height) */
     this.scrollStartY = null;
+    /** Ending translateY in px (null = text scrolled fully above view, -textHeight) */
+    this.scrollEndY = null;
     this.running = false;
     this.paused = false;
     this.y = 0;
@@ -31,7 +33,7 @@ export class ScrollPreview {
     this.textHeight = th;
     this.startY =
       this.scrollStartY != null ? this.scrollStartY : ch;
-    this.endY = -th;
+    this.endY = this.scrollEndY != null ? this.scrollEndY : -th;
   }
 
   getScrollDuration() {
