@@ -17,7 +17,7 @@
       <h1>MM-Scroller</h1>
     </div>
     <div class="header-actions">
-      <button type="button" id="btn-export" class="btn btn-primary">Export MP4</button>
+      <button type="button" id="btn-export" class="btn btn-primary" title="1080p, 30 fps">Export MP4</button>
     </div>
   </header>
 
@@ -69,7 +69,7 @@
             rows="10"
             spellcheck="true"
             aria-label="Plain text editor"
-            placeholder="Type or paste text here. One line per row; blank lines add spacing."
+            placeholder="Type or paste text here. One line per row; :shortcode: → emoji (e.g. :star:)."
           ></textarea>
         </div>
         </div>
@@ -430,6 +430,7 @@
       <div id="export-progress" class="export-progress hidden" role="status" aria-live="polite">
         <div class="export-progress-bar"><div id="export-progress-fill"></div></div>
         <span id="export-progress-label">Exporting…</span>
+        <p id="export-progress-hint" class="export-progress-hint">Keep this tab open until export finishes.</p>
       </div>
     </div>
   </main>

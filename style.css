@@ -958,6 +958,13 @@ input[type="color"] {
   color: var(--text-muted);
 }
 
+.export-progress-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.9;
+}
+
 /* Recording indicator */
 .preview-canvas.is-recording {
   outline: 2px solid var(--danger);

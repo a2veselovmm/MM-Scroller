@@ -1,4 +1,8 @@
-import { initFontPicker } from "./fonts.js";
+import { expandEmojiShortcodes, expandShortcodesInEditable } from "./emojiShortcodes.js";
+import {
+  loadImageElement,
+  rasterizeBackgroundToCanvasSize,
+} from "./backgroundImage.js";
 import { createUndoManager } from "./undoHistory.js";
 import { getDesignCanvasSize } from "./canvasDesign.js";
 import { ScrollPreview } from "./preview.js";
@@ -121,6 +125,8 @@ const panelResizer = $("panel-resizer");
 
 const engine = new ScrollPreview(canvas, textEl, textContainer);
 let bgObjectUrl = null;
+/** Full-resolution upload; kept for re-rasterize on aspect/fit change. */
+let bgSourceUrl = null;
 let isExporting = false;
 let isImporting = false;
 let isScrubbing = false;
@@ -321,9 +327,13 @@ function togglePlayPause() {
   updatePlayPauseButton();
 }
 
+function fontStack(family = state.fontFamily) {
+  return `"${family}", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji"`;
+}
+
 function getLayoutStyles() {
   return {
-    fontFamily: `"${state.fontFamily}", sans-serif`,
+    fontFamily: fontStack(),
     fontSize: state.fontSize,
     color: hexToRgba(state.fontColor, state.fontOpacity),
     textAlign: state.textAlign,
@@ -392,7 +402,7 @@ function applyDefaultStylesToAllText() {
   if (state.editMode !== "styled") return;
 
   const color = hexToRgba(state.fontColor, state.fontOpacity);
-  const fontFamily = `"${state.fontFamily}", sans-serif`;
+  const fontFamily = fontStack();
   const shadow = shadowStylePayload(state);
   const stroke = strokeStylePayload(state);
   const nodes = textEditor.querySelectorAll(".text-line, .text-run, .text-span");
@@ -455,6 +465,7 @@ function syncFromEditor() {
     return;
   }
 
+  expandShortcodesInEditable(textEditor);
   lastStyledHtml = textEditor.innerHTML;
   applyLayoutStyles(textEditor, textEl, getLayoutStyles());
   syncEditorToPreview(textEditor, textEl);
@@ -838,13 +849,47 @@ function setAspectRatio(ratio) {
 
 function clearBackground() {
   if (bgObjectUrl) URL.revokeObjectURL(bgObjectUrl);
+  if (bgSourceUrl && bgSourceUrl !== bgObjectUrl) URL.revokeObjectURL(bgSourceUrl);
   bgObjectUrl = null;
+  bgSourceUrl = null;
   state.bgUrl = null;
   state.hasBackgroundImage = false;
   bgImage.classList.add("hidden");
   bgImage.removeAttribute("src");
   bgPlaceholder.classList.remove("hidden");
   $("bg-filename").textContent = "No file — gradient placeholder";
+}
+
+async function applyBackgroundDisplayUrl(displayUrl) {
+  state.bgUrl = displayUrl;
+  bgImage.onload = () => remeasureAndApply();
+  bgImage.src = displayUrl;
+  bgImage.classList.remove("hidden");
+  bgPlaceholder.classList.add("hidden");
+  requestAnimationFrame(() => remeasureAndApply());
+  applyBackground();
+}
+
+async function refreshBackgroundRaster() {
+  if (!bgSourceUrl || !state.hasBackgroundImage) return;
+
+  try {
+    const img = await loadImageElement(bgSourceUrl);
+    const optimized = await rasterizeBackgroundToCanvasSize(
+      img,
+      state.aspectRatio,
+      state.fitMode
+    );
+    const displayUrl = optimized ?? bgSourceUrl;
+
+    if (bgObjectUrl && bgObjectUrl !== bgSourceUrl && bgObjectUrl !== displayUrl) {
+      URL.revokeObjectURL(bgObjectUrl);
+    }
+    bgObjectUrl = displayUrl;
+    await applyBackgroundDisplayUrl(displayUrl);
+  } catch (err) {
+    console.warn(err);
+  }
 }
 
 async function loadBackground(file) {
@@ -856,18 +901,25 @@ async function loadBackground(file) {
 
   if (!undoManager.isRestoring() && !isImporting) pushUndo();
   clearBackground();
-  const url = URL.createObjectURL(file);
-  bgObjectUrl = url;
-  state.bgUrl = url;
+
+  const sourceUrl = URL.createObjectURL(file);
+  bgSourceUrl = sourceUrl;
   state.hasBackgroundImage = true;
   $("bg-filename").textContent = file.name;
 
-  bgImage.onload = () => remeasureAndApply();
-  bgImage.src = url;
-  bgImage.classList.remove("hidden");
-  bgPlaceholder.classList.add("hidden");
-  requestAnimationFrame(() => remeasureAndApply());
-  applyBackground();
+  try {
+    const img = await loadImageElement(sourceUrl);
+    const optimized = await rasterizeBackgroundToCanvasSize(
+      img,
+      state.aspectRatio,
+      state.fitMode
+    );
+    bgObjectUrl = optimized ?? sourceUrl;
+    await applyBackgroundDisplayUrl(bgObjectUrl);
+  } catch (err) {
+    clearBackground();
+    alert(`Could not load background: ${err.message}`);
+  }
 }
 
 function initEditor() {
@@ -904,7 +956,7 @@ function initEditor() {
   textEditor.addEventListener("paste", (e) => {
     if (!undoManager.isRestoring()) pushUndo();
     e.preventDefault();
-    const text = e.clipboardData.getData("text/plain");
+    const text = expandEmojiShortcodes(e.clipboardData.getData("text/plain"));
     document.execCommand("insertText", false, text);
     requestAnimationFrame(() => syncFromEditor());
   });
@@ -955,7 +1007,7 @@ function initControls() {
     state.fontFamily = font.family.replace(/\+/g, " ");
     applyToSelectionOrDefault(() => {
       applyStyleToSelection(textEditor, {
-        fontFamily: `"${state.fontFamily}", sans-serif`,
+        fontFamily: fontStack(state.fontFamily),
       });
     });
   });
@@ -1159,6 +1211,7 @@ function initControls() {
     if (!undoManager.isRestoring()) pushUndo();
     state.fitMode = e.target.value;
     applyBackground();
+    refreshBackgroundRaster();
   });
 
   bindRange("blur", "blur-val", (v) => `${v}px`, (v) => {
@@ -1253,6 +1306,7 @@ function initControls() {
     setAspectRatio(state.aspectRatio);
     syncEngineDesignSpace();
     requestAnimationFrame(() => {
+      refreshBackgroundRaster();
       updateScrollPositionControls();
       applyBgEffects();
       refreshPreview();
@@ -1411,9 +1465,6 @@ async function runExport() {
       musicLoop: state.musicLoop,
       voiceVolume: state.voiceVolume,
       onFrame: async (t) => {
-        if (state.glowEnabled && textGlowBack) {
-          syncGlowLayer();
-        }
         syncTimelineAudio(t);
       },
       onProgress: (pct) => {
@@ -1571,7 +1622,7 @@ function applyImportedText(text) {
     text.styledHtml && String(text.styledHtml).trim()
       ? text.styledHtml
       : defaultEditorHtml();
-  textPlain.value = text.plainText ?? htmlToPlain(lastStyledHtml);
+  textPlain.value = expandEmojiShortcodes(text.plainText ?? htmlToPlain(lastStyledHtml));
   plainOnModeEnter = textPlain.value;
 
   const mode = text.editMode === "plain" ? "plain" : "styled";
@@ -1581,6 +1632,8 @@ function applyImportedText(text) {
 
   if (mode === "styled") {
     textEditor.innerHTML = lastStyledHtml;
+    expandShortcodesInEditable(textEditor);
+    lastStyledHtml = textEditor.innerHTML;
     textEditor.classList.remove("hidden");
     textPlain.classList.add("hidden");
     viewLabelPlain.classList.remove("is-active");

@@ -8,10 +8,12 @@ import {
   drawVignette,
   readBgEffectsFromCanvas,
 } from "./backgroundEffects.js";
+import { drawImageFit } from "./backgroundImage.js";
+import { evenDimension, getExportCanvasSize, EXPORT_FPS } from "./canvasDesign.js";
 import { encodeFrameSequence } from "./frameEncoder.js";
 import { buildGlowShadowStack } from "./textEffects.js";
 
-export const EXPORT_FPS = 30;
+export { EXPORT_FPS };
 const FPS = EXPORT_FPS;
 
 function parseShadow(cs, rootStyle) {
@@ -247,11 +249,6 @@ function readGlowState(canvasEl) {
   };
 }
 
-function evenDimension(n) {
-  const v = Math.max(2, Math.round(n));
-  return v % 2 === 0 ? v : v - 1;
-}
-
 function flushLayout(el) {
   void el.offsetHeight;
 }
@@ -288,34 +285,8 @@ function drawBackgroundLayer(ctx, canvasEl, w, h) {
 
   const drawMedia = (el, fit) => {
     if (!el) return;
-    const mw = el.naturalWidth || el.width;
-    const mh = el.naturalHeight || el.height;
-    if (!mw || !mh) return;
-
-    let dw = w;
-    let dh = h;
-    let dx = 0;
-    let dy = 0;
-
-    if (fit === "contain") {
-      const s = Math.min(w / mw, h / mh);
-      dw = mw * s;
-      dh = mh * s;
-      dx = (w - dw) / 2;
-      dy = (h - dh) / 2;
-    } else if (fit === "fill") {
-      dw = w;
-      dh = h;
-    } else {
-      const s = Math.max(w / mw, h / mh);
-      dw = mw * s;
-      dh = mh * s;
-      dx = (w - dw) / 2;
-      dy = (h - dh) / 2;
-    }
-
     try {
-      ctx.drawImage(el, dx, dy, dw, dh);
+      drawImageFit(ctx, el, w, h, fit);
     } catch {
       /* cross-origin taint */
     }
@@ -465,14 +436,11 @@ export async function exportRecording(canvasEl, engine, hooks = {}) {
     onFrame = () => {},
   } = hooks;
 
+  const aspectRatio = canvasEl.dataset.aspect || "9/16";
   const rect = canvasEl.getBoundingClientRect();
   const w = evenDimension(rect.width);
   const h = evenDimension(rect.height);
-  const MAX_EDGE = 1080;
-  const longEdge = Math.max(w, h);
-  const scale = longEdge > MAX_EDGE ? MAX_EDGE / longEdge : 1;
-  const ew = evenDimension(w * scale);
-  const eh = evenDimension(h * scale);
+  const { width: ew, height: eh } = getExportCanvasSize(aspectRatio);
 
   const recordCanvas = document.createElement("canvas");
   recordCanvas.width = ew;

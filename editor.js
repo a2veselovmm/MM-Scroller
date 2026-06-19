@@ -2,6 +2,8 @@
  * Photoshop-style WYSIWYG text editor (contenteditable).
  */
 
+import { expandEmojiShortcodes } from "./emojiShortcodes.js";
+
 /** @param {HTMLElement} editor */
 export function hasSelectionIn(editor) {
   const sel = window.getSelection();
@@ -358,15 +360,16 @@ export function htmlToPlain(htmlOrElement) {
 
 /** Build styled line blocks from plain text (default styling only) */
 export function plainToHtml(text) {
+  const expanded = expandEmojiShortcodes(text ?? "");
   const escaped = (s) =>
     s
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 
-  if (!text) return '<div class="text-line"><br></div>';
+  if (!expanded) return '<div class="text-line"><br></div>';
 
-  return text.split("\n").map((line) => {
+  return expanded.split("\n").map((line) => {
     const inner = line.length ? escaped(line) : "<br>";
     return `<div class="text-line">${inner}</div>`;
   }).join("");
