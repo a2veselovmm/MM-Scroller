@@ -39,25 +39,25 @@ export function drawVignette(ctx, w, h, effects) {
   if (!effects.vignetteEnabled) return;
 
   const { rx, ry } = vignetteRadiiPercent(effects);
-  const innerFrac =
-    vignetteInnerStopPercent(rx, ry, effects.vignetteSoftness) / 100;
+  const inner = vignetteInnerStopPercent(rx, ry, effects.vignetteSoftness) / 100;
   const color = hexToRgba(effects.vignetteColor, vignetteOpacityAlpha(effects));
-  const maxExtent = Math.max(w, h);
-  const rxPx = (rx / 100) * w * 0.5;
-  const ryPx = (ry / 100) * h * 0.5;
+
+  // Match CSS: ellipse rx% ry% → radii as % of width / height (not semi-box).
+  const rxR = (rx / 100) * w;
+  const ryR = (ry / 100) * h;
+  if (rxR <= 0 || ryR <= 0) return;
 
   ctx.save();
-  ctx.translate(w * 0.5, h * 0.5);
-  ctx.scale(rxPx / maxExtent, ryPx / maxExtent);
+  ctx.translate(w / 2, h / 2);
+  ctx.scale(rxR, ryR);
 
-  const innerR = innerFrac * maxExtent;
-  const g = ctx.createRadialGradient(0, 0, innerR, 0, 0, maxExtent);
+  const g = ctx.createRadialGradient(0, 0, inner, 0, 0, 1);
   g.addColorStop(0, "rgba(0,0,0,0)");
-  g.addColorStop(Math.min(0.98, innerFrac), "rgba(0,0,0,0)");
+  g.addColorStop(Math.min(0.98, inner), "rgba(0,0,0,0)");
   g.addColorStop(1, color);
 
   ctx.fillStyle = g;
-  ctx.fillRect(-maxExtent, -maxExtent, maxExtent * 2, maxExtent * 2);
+  ctx.fillRect(-1, -1, 2, 2);
   ctx.restore();
 }
 

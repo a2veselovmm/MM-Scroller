@@ -306,33 +306,27 @@ function drawBackgroundLayer(ctx, canvasEl, w, h) {
 
 }
 
-function buildBackgroundCache(canvasEl, w, h, ew, eh, drawScale) {
-  const scratch = document.createElement("canvas");
-  scratch.width = w;
-  scratch.height = h;
-  const sctx = scratch.getContext("2d");
-  drawBackgroundLayer(sctx, canvasEl, w, h);
+/** Bake background + vignette + overlay + blur at export resolution (ew×eh). */
+function buildBackgroundCache(canvasEl, ew, eh, drawScale) {
+  const cache = document.createElement("canvas");
+  cache.width = ew;
+  cache.height = eh;
+  const sctx = cache.getContext("2d");
+  drawBackgroundLayer(sctx, canvasEl, ew, eh);
 
   const bgEffects = readBgEffectsFromCanvas(canvasEl);
-  drawVignette(sctx, w, h, bgEffects);
-  drawColorOverlay(sctx, w, h, bgEffects);
+  drawVignette(sctx, ew, eh, bgEffects);
+  drawColorOverlay(sctx, ew, eh, bgEffects);
 
   const overlay = canvasEl.querySelector("#overlay-layer");
   const bgBlur = parseFloat(overlay?.dataset.blur ?? "0");
   if (bgBlur > 0) {
-    const snap = sctx.getImageData(0, 0, w, h);
-    sctx.filter = `blur(${bgBlur}px)`;
+    const snap = sctx.getImageData(0, 0, ew, eh);
+    sctx.filter = `blur(${bgBlur * drawScale}px)`;
     sctx.putImageData(snap, 0, 0);
     sctx.filter = "none";
   }
 
-  const cache = document.createElement("canvas");
-  cache.width = ew;
-  cache.height = eh;
-  const ctx = cache.getContext("2d");
-  ctx.setTransform(drawScale, 0, 0, drawScale, 0, 0);
-  ctx.drawImage(scratch, 0, 0);
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
   return cache;
 }
 
@@ -403,7 +397,7 @@ function compositeFrame(
 
   if (glowCanvas && glowState?.enabled) {
     ctx.save();
-    ctx.filter = `blur(${glowState.sharpness}px)`;
+    ctx.filter = `blur(${glowState.sharpness * drawScale}px)`;
     ctx.drawImage(glowCanvas, 0, tyLayout);
     ctx.restore();
   }
@@ -454,7 +448,7 @@ export async function exportRecording(canvasEl, engine, hooks = {}) {
   engine.measure();
 
   onStatus("Caching background…");
-  const bgCache = buildBackgroundCache(canvasEl, w, h, ew, eh, drawScale);
+  const bgCache = buildBackgroundCache(canvasEl, ew, eh, drawScale);
 
   onStatus("Caching text…");
   const glowState = readGlowState(canvasEl);
