@@ -3,6 +3,7 @@ import {
   loadImageElement,
   rasterizeBackgroundToCanvasSize,
 } from "./backgroundImage.js";
+import { initFontPicker } from "./fonts.js";
 import { createUndoManager } from "./undoHistory.js";
 import { getDesignCanvasSize } from "./canvasDesign.js";
 import { ScrollPreview } from "./preview.js";
