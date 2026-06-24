@@ -9,9 +9,9 @@ import {
   readBgEffectsFromCanvas,
 } from "./backgroundEffects.js";
 import { drawImageFit } from "./backgroundImage.js";
-import { evenDimension, getExportCanvasSize, EXPORT_FPS } from "./canvasDesign.js";
+import { evenDimension, getDesignCanvasSize, getExportCanvasSize, EXPORT_FPS } from "./canvasDesign.js";
 import { encodeFrameSequence } from "./frameEncoder.js";
-import { buildGlowShadowStack } from "./textEffects.js";
+import { runAtDesignScale } from "./previewLayout.js";
 
 export { EXPORT_FPS };
 const FPS = EXPORT_FPS;
@@ -177,43 +177,12 @@ function mergeCharBoxes(boxes, rootStyle) {
   return runs;
 }
 
-function drawGlowSegment(ctx, seg, x, y, options) {
-  ctx.save();
-  ctx.font = seg.font;
-  ctx.globalAlpha = options.glowOpacity ?? 0.6;
-  ctx.textBaseline = "top";
-  ctx.textAlign = "left";
-  ctx.fillStyle = options.glowColor || "#000";
-  const stacks = buildGlowShadowStack({
-    color: options.glowColorHex || "#000000",
-    opacity: options.glowOpacity ?? 0.6,
-    radius: options.glowRadius ?? 24,
-    softness: options.glowSoftness ?? 50,
-  });
-  if (stacks !== "none") {
-    ctx.shadowColor = "transparent";
-    const parts = stacks.split(", ");
-    for (const part of parts) {
-      const m = part.match(/0 0 ([\d.]+)px (rgba?\([^)]+\))/);
-      if (m) {
-        ctx.shadowBlur = parseFloat(m[1]);
-        ctx.shadowColor = m[2];
-        ctx.fillText(seg.text, x, y);
-      }
-    }
-  }
-  ctx.fillText(seg.text, x, y);
-  ctx.restore();
-}
-
-/** Draw text exactly where the browser laid it out (wrap, padding, alignment). */
-function drawTextFromDomLayout(ctx, textContent, originRect, canvasW, canvasH, options = {}) {
+function drawTextFromDomLayout(ctx, textContent, originRect, canvasW, canvasH) {
   const rootStyle = getComputedStyle(textContent);
   const padL = parseFloat(rootStyle.paddingLeft) || 0;
   const padR = parseFloat(rootStyle.paddingRight) || 0;
   const boxes = collectCharBoxes(textContent, originRect);
   const runs = mergeCharBoxes(boxes, rootStyle);
-  const glowMode = options.mode === "glow";
 
   ctx.save();
   ctx.beginPath();
@@ -221,32 +190,10 @@ function drawTextFromDomLayout(ctx, textContent, originRect, canvasW, canvasH, o
   ctx.clip();
 
   for (const run of runs) {
-    if (glowMode) {
-      drawGlowSegment(ctx, run, run.x, run.y, options);
-    } else {
-      drawSegment(ctx, run, run.x, run.y);
-    }
+    drawSegment(ctx, run, run.x, run.y);
   }
 
   ctx.restore();
-}
-
-function readGlowState(canvasEl) {
-  const glow = canvasEl.querySelector("#text-glow-back");
-  if (!glow || glow.classList.contains("hidden")) {
-    return { enabled: false };
-  }
-  const cs = getComputedStyle(glow);
-  const blur = parseFloat(cs.getPropertyValue("--glow-blur")) || 12;
-  return {
-    enabled: true,
-    sharpness: blur,
-    opacity: parseFloat(cs.opacity) || 0.6,
-    color: cs.color || "#000",
-    colorHex: canvasEl.dataset.glowColor || "#000000",
-    radius: parseFloat(canvasEl.dataset.glowRadius || "24"),
-    softness: parseFloat(canvasEl.dataset.glowSoftness || "50"),
-  };
 }
 
 function flushLayout(el) {
@@ -306,8 +253,8 @@ function drawBackgroundLayer(ctx, canvasEl, w, h) {
 
 }
 
-/** Bake background + vignette + overlay + blur at export resolution (ew×eh). */
-function buildBackgroundCache(canvasEl, ew, eh, drawScale) {
+/** Bake background + vignette + overlay at export resolution (ew×eh). */
+function buildBackgroundCache(canvasEl, ew, eh) {
   const cache = document.createElement("canvas");
   cache.width = ew;
   cache.height = eh;
@@ -318,35 +265,16 @@ function buildBackgroundCache(canvasEl, ew, eh, drawScale) {
   drawVignette(sctx, ew, eh, bgEffects);
   drawColorOverlay(sctx, ew, eh, bgEffects);
 
-  const overlay = canvasEl.querySelector("#overlay-layer");
-  const bgBlur = parseFloat(overlay?.dataset.blur ?? "0");
-  if (bgBlur > 0) {
-    const snap = sctx.getImageData(0, 0, ew, eh);
-    sctx.filter = `blur(${bgBlur * drawScale}px)`;
-    sctx.putImageData(snap, 0, 0);
-    sctx.filter = "none";
-  }
-
   return cache;
 }
 
-function buildTextLayerCaches(textContent, w, glowState) {
+function buildTextLayerCaches(textContent, w) {
   const savedTransform = textContent.style.transform;
   textContent.style.transform = "translateY(0px)";
   flushLayout(textContent);
 
   const originRect = textContent.getBoundingClientRect();
   const layerH = Math.max(1, Math.ceil(textContent.offsetHeight));
-  const glowOpts = glowState.enabled
-    ? {
-        mode: "glow",
-        glowColor: glowState.color,
-        glowColorHex: glowState.colorHex,
-        glowOpacity: glowState.opacity,
-        glowRadius: glowState.radius,
-        glowSoftness: glowState.softness,
-      }
-    : null;
 
   const textCanvas = document.createElement("canvas");
   textCanvas.width = w;
@@ -359,29 +287,14 @@ function buildTextLayerCaches(textContent, w, glowState) {
     layerH
   );
 
-  let glowCanvas = null;
-  if (glowOpts) {
-    glowCanvas = document.createElement("canvas");
-    glowCanvas.width = w;
-    glowCanvas.height = layerH;
-    const gctx = glowCanvas.getContext("2d");
-    gctx.save();
-    const glowScale = 1 + glowState.radius / 300;
-    gctx.translate(w / 2, 0);
-    gctx.scale(glowScale, 1);
-    gctx.translate(-w / 2, 0);
-    drawTextFromDomLayout(gctx, textContent, originRect, w, layerH, glowOpts);
-    gctx.restore();
-  }
-
   textContent.style.transform = savedTransform;
-  return { textCanvas, glowCanvas, glowState };
+  return { textCanvas };
 }
 
 function compositeFrame(
   ctx,
   ty,
-  { bgCache, textCanvas, glowCanvas, glowState, w, h, ew, eh, drawScale, designHeight }
+  { bgCache, textCanvas, w, h, ew, eh, drawScale, designHeight }
 ) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(bgCache, 0, 0);
@@ -394,13 +307,6 @@ function compositeFrame(
 
   const designH = designHeight || h;
   const tyLayout = ty * (h / designH);
-
-  if (glowCanvas && glowState?.enabled) {
-    ctx.save();
-    ctx.filter = `blur(${glowState.sharpness * drawScale}px)`;
-    ctx.drawImage(glowCanvas, 0, tyLayout);
-    ctx.restore();
-  }
 
   if (textCanvas) {
     ctx.drawImage(textCanvas, 0, tyLayout);
@@ -431,10 +337,12 @@ export async function exportRecording(canvasEl, engine, hooks = {}) {
   } = hooks;
 
   const aspectRatio = canvasEl.dataset.aspect || "9/16";
-  const rect = canvasEl.getBoundingClientRect();
-  const w = evenDimension(rect.width);
-  const h = evenDimension(rect.height);
+  const { width: designWidth, height: designHeight } =
+    getDesignCanvasSize(aspectRatio);
   const { width: ew, height: eh } = getExportCanvasSize(aspectRatio);
+  const w = evenDimension(designWidth);
+  const h = evenDimension(designHeight);
+  const stageEl = canvasEl.querySelector("#preview-stage") || canvasEl;
 
   const recordCanvas = document.createElement("canvas");
   recordCanvas.width = ew;
@@ -448,13 +356,14 @@ export async function exportRecording(canvasEl, engine, hooks = {}) {
   engine.measure();
 
   onStatus("Caching background…");
-  const bgCache = buildBackgroundCache(canvasEl, ew, eh, drawScale);
+  const bgCache = runAtDesignScale(stageEl, () =>
+    buildBackgroundCache(canvasEl, ew, eh)
+  );
 
   onStatus("Caching text…");
-  const glowState = readGlowState(canvasEl);
   const textLayers = textContent
-    ? buildTextLayerCaches(textContent, w, glowState)
-    : { textCanvas: null, glowCanvas: null, glowState };
+    ? runAtDesignScale(stageEl, () => buildTextLayerCaches(textContent, w))
+    : { textCanvas: null };
 
   const layerBundle = {
     bgCache,

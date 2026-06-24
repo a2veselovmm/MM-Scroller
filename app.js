@@ -1,3 +1,16 @@
+import { initAuth, signInWithGoogle, signOut, getIdToken, getCurrentUser } from "./auth.js";
+import {
+  startCloudRender,
+  onQueueUpdate,
+  startPolling,
+  ensurePolling,
+  cancelJob,
+  retryJob,
+  deleteJob,
+  triggerDownload,
+  isActive,
+} from "./renderQueue.js";
+import { fetchJobSetup } from "./cloudExport.js";
 import { expandEmojiShortcodes, expandShortcodesInEditable } from "./emojiShortcodes.js";
 import {
   loadImageElement,
@@ -6,6 +19,8 @@ import {
 import { initFontPicker } from "./fonts.js";
 import { createUndoManager } from "./undoHistory.js";
 import { getDesignCanvasSize } from "./canvasDesign.js";
+import { applyPreviewLayout } from "./previewLayout.js";
+import { LIMITS } from "./server/shared/constants.js";
 import { ScrollPreview } from "./preview.js";
 import { applyBgEffectsToDom } from "./backgroundEffects.js";
 import { exportRecording, downloadBlob } from "./export.js";
@@ -35,7 +50,6 @@ import {
 import {
   buildTextShadow,
   buildTextStroke,
-  applyGlowLayer,
   strokeStylePayload,
   shadowStylePayload,
   hexToRgba,
@@ -57,12 +71,6 @@ const state = {
   shadowColor: "#000000",
   shadowOpacity: 0.85,
   shadowSoftness: 8,
-  glowEnabled: false,
-  glowColor: "#000000",
-  glowOpacity: 0.6,
-  glowRadius: 24,
-  glowSharpness: 12,
-  glowSoftness: 50,
   paddingH: 48,
   scrollSpeed: 80,
   startDelay: 0,
@@ -71,7 +79,6 @@ const state = {
   /** Canvas Y (px): bottom edge of text at timeline end. */
   scrollLastRow: null,
   fitMode: "cover",
-  blur: 0,
   colorOverlayEnabled: false,
   colorOverlayColor: "#000000",
   colorOverlayOpacity: 40,
@@ -95,6 +102,9 @@ const state = {
 const $ = (id) => document.getElementById(id);
 
 const canvas = $("preview-canvas");
+const previewStage = $("preview-stage");
+const previewWrapper = $("preview-wrapper");
+const previewArea = document.querySelector(".preview-area");
 const textEl = $("text-content");
 const textEditor = $("text-editor");
 const textPlain = $("text-plain");
@@ -104,7 +114,6 @@ const editModeToggle = $("edit-mode-toggle");
 const viewLabelPlain = $("view-label-plain");
 const viewLabelStyled = $("view-label-styled");
 const textContainer = $("text-scroll-container");
-const textGlowBack = $("text-glow-back");
 const bgImage = $("bg-image");
 const bgMusic = $("bg-music");
 const bgVoice = $("bg-voice");
@@ -112,7 +121,6 @@ const bgPlaceholder = $("bg-placeholder");
 
 let bgMusicObjectUrl = null;
 let bgVoiceObjectUrl = null;
-const overlayLayer = $("overlay-layer");
 const bgVignetteLayer = $("bg-vignette-layer");
 const bgColorOverlay = $("bg-color-overlay");
 const playbackStatus = $("playback-status");
@@ -129,6 +137,7 @@ let bgObjectUrl = null;
 /** Full-resolution upload; kept for re-rasterize on aspect/fit change. */
 let bgSourceUrl = null;
 let isExporting = false;
+let isCloudUploading = false;
 let isImporting = false;
 let isScrubbing = false;
 let lastStyledHtml = "";
@@ -234,20 +243,6 @@ function applyStateToControls() {
   $("shadow-softness").value = String(state.shadowSoftness);
   $("shadow-softness-val").textContent = `${state.shadowSoftness}px`;
 
-  $("glow-enabled").checked = state.glowEnabled;
-  $("glow-color").value = state.glowColor;
-  $("glow-opacity").value = String(Math.round(state.glowOpacity * 100));
-  $("glow-opacity-val").textContent = `${Math.round(state.glowOpacity * 100)}%`;
-  $("glow-radius").value = String(state.glowRadius);
-  $("glow-radius-val").textContent = `${state.glowRadius}px`;
-  $("glow-sharpness").value = String(state.glowSharpness);
-  $("glow-sharpness-val").textContent = `${state.glowSharpness}px`;
-  $("glow-softness").value = String(state.glowSoftness);
-  $("glow-softness-val").textContent = String(state.glowSoftness);
-
-  $("blur").value = String(state.blur);
-  $("blur-val").textContent = `${state.blur}px`;
-
   $("color-overlay-enabled").checked = state.colorOverlayEnabled;
   $("color-overlay-color").value = state.colorOverlayColor;
   $("color-overlay-opacity").value = String(state.colorOverlayOpacity);
@@ -272,7 +267,6 @@ function applyStateToControls() {
 
   setEffectPanelEnabled("stroke-controls", state.strokeEnabled);
   setEffectPanelEnabled("shadow-controls", state.shadowEnabled);
-  setEffectPanelEnabled("glow-controls", state.glowEnabled);
   setEffectPanelEnabled("color-overlay-controls", state.colorOverlayEnabled);
   setEffectPanelEnabled("vignette-controls", state.vignetteEnabled);
 
@@ -297,9 +291,6 @@ engine.onComplete = () => {
 };
 engine.onTimeUpdate = (current, total) => {
   updateTimelineUI(current, total);
-  if (state.glowEnabled && textGlowBack) {
-    textGlowBack.style.transform = textEl.style.transform;
-  }
   try {
     const isPlaying = engine.running && !engine.paused;
     syncTimelineAudio(current, { isPlaying });
@@ -356,26 +347,6 @@ function getLayoutStyles() {
   };
 }
 
-function syncGlowLayer() {
-  applyGlowLayer(textGlowBack, state);
-  if (!state.glowEnabled) return;
-
-  textGlowBack.innerHTML = textEl.innerHTML;
-  textGlowBack.style.transform = textEl.style.transform;
-  textGlowBack.style.fontFamily = textEl.style.fontFamily;
-  textGlowBack.style.fontSize = textEl.style.fontSize;
-  textGlowBack.style.textAlign = textEl.style.textAlign;
-  textGlowBack.style.lineHeight = textEl.style.lineHeight;
-  textGlowBack.style.letterSpacing = textEl.style.letterSpacing;
-  textGlowBack.style.paddingLeft = textEl.style.paddingLeft;
-  textGlowBack.style.paddingRight = textEl.style.paddingRight;
-  textGlowBack.style.width = textEl.style.width;
-
-  canvas.dataset.glowColor = state.glowColor;
-  canvas.dataset.glowRadius = String(state.glowRadius);
-  canvas.dataset.glowSoftness = String(state.glowSoftness);
-}
-
 function setEffectPanelEnabled(panelId, enabled) {
   $(panelId).classList.toggle("is-disabled", !enabled);
 }
@@ -394,7 +365,6 @@ function syncPreviewFromStyled() {
       : getStyledHtmlForPreview();
   applyLayoutStyles(textEditor, textEl, getLayoutStyles());
   textEl.innerHTML = html;
-  syncGlowLayer();
   scheduleTimelineRefresh();
 }
 
@@ -461,7 +431,6 @@ function syncFromEditor() {
     const html = plainToHtml(textPlain.value);
     applyLayoutStyles(textEditor, textEl, getLayoutStyles());
     textEl.innerHTML = html;
-    syncGlowLayer();
     scheduleTimelineRefresh();
     return;
   }
@@ -470,7 +439,6 @@ function syncFromEditor() {
   lastStyledHtml = textEditor.innerHTML;
   applyLayoutStyles(textEditor, textEl, getLayoutStyles());
   syncEditorToPreview(textEditor, textEl);
-  syncGlowLayer();
   scheduleTimelineRefresh();
 }
 
@@ -732,10 +700,37 @@ function getCanvasScrollHeight() {
   return getDesignCanvasSize(state.aspectRatio).height;
 }
 
+function syncPreviewLayout() {
+  const layout = applyPreviewLayout({
+    canvasEl: canvas,
+    stageEl: previewStage,
+    wrapperEl: previewWrapper,
+    previewAreaEl: previewArea,
+    aspectRatio: state.aspectRatio,
+  });
+  engine.designWidth = layout.designWidth;
+  engine.designHeight = layout.designHeight;
+  return layout;
+}
+
+function getDesignDimensions() {
+  const { width, height } = getDesignCanvasSize(state.aspectRatio);
+  return { w: width, h: height };
+}
+
 function getPreviewDisplayScale() {
-  const ch = canvas.clientHeight || textContainer.clientHeight || 1;
-  const dh = getCanvasScrollHeight();
-  return ch / dh;
+  const layout = readPreviewLayoutFromDom();
+  return layout.previewScale;
+}
+
+function readPreviewLayoutFromDom() {
+  const scale = parseFloat(canvas.dataset.previewScale || "1");
+  const { width, height } = getDesignCanvasSize(state.aspectRatio);
+  return {
+    designWidth: parseInt(canvas.dataset.designWidth, 10) || width,
+    designHeight: parseInt(canvas.dataset.designHeight, 10) || height,
+    previewScale: Number.isFinite(scale) ? scale : 1,
+  };
 }
 
 function migrateScrollRowSettings() {
@@ -814,8 +809,7 @@ function bindColorInput(id, onChange) {
 }
 
 function applyBgEffects() {
-  const w = canvas.clientWidth;
-  const h = canvas.clientHeight;
+  const { w, h } = getDesignDimensions();
   applyBgEffectsToDom(bgVignetteLayer, bgColorOverlay, w, h, {
     vignetteEnabled: state.vignetteEnabled,
     vignetteColor: state.vignetteColor,
@@ -835,17 +829,13 @@ function applyBackground() {
   bgImage.dataset.fit = fit;
   bgImage.style.objectFit = fit === "fill" ? "fill" : fit;
 
-  overlayLayer.dataset.blur = String(state.blur);
-  overlayLayer.style.background = "transparent";
-  overlayLayer.style.backdropFilter = state.blur > 0 ? `blur(${state.blur}px)` : "none";
-
   applyBgEffects();
   engine.applyTime(engine.timelineTime);
 }
 
 function setAspectRatio(ratio) {
-  canvas.style.aspectRatio = ratio.replace("/", " / ");
   canvas.dataset.aspect = ratio;
+  syncPreviewLayout();
 }
 
 function clearBackground() {
@@ -1149,38 +1139,6 @@ function initControls() {
     });
   });
 
-  $("glow-enabled").addEventListener("change", (e) => {
-    if (!undoManager.isRestoring()) pushUndo();
-    state.glowEnabled = e.target.checked;
-    setEffectPanelEnabled("glow-controls", state.glowEnabled);
-    refreshPreview();
-  });
-
-  bindColorInput("glow-color", (e) => {
-    state.glowColor = e.target.value;
-    refreshPreview();
-  });
-
-  bindRange("glow-opacity", "glow-opacity-val", (v) => `${v}%`, (v) => {
-    state.glowOpacity = v / 100;
-    refreshPreview();
-  });
-
-  bindRange("glow-radius", "glow-radius-val", (v) => `${v}px`, (v) => {
-    state.glowRadius = v;
-    refreshPreview();
-  });
-
-  bindRange("glow-sharpness", "glow-sharpness-val", (v) => `${v}px`, (v) => {
-    state.glowSharpness = v;
-    refreshPreview();
-  });
-
-  bindRange("glow-softness", "glow-softness-val", (v) => String(v), (v) => {
-    state.glowSoftness = v;
-    refreshPreview();
-  });
-
   bindRange("padding-h", "padding-h-val", (v) => `${v}px`, (v) => {
     state.paddingH = v;
     refreshPreview();
@@ -1213,11 +1171,6 @@ function initControls() {
     state.fitMode = e.target.value;
     applyBackground();
     refreshBackgroundRaster();
-  });
-
-  bindRange("blur", "blur-val", (v) => `${v}px`, (v) => {
-    state.blur = v;
-    applyBackground();
   });
 
   $("color-overlay-enabled").addEventListener("change", (e) => {
@@ -1335,6 +1288,8 @@ function initPanelResize() {
     const dx = e.clientX - startX;
     const w = Math.min(560, Math.max(260, startW + dx));
     appMain.style.setProperty("--panel-w", `${w}px`);
+    syncPreviewLayout();
+    engine.applyTime(engine.timelineTime);
   };
 
   const onUp = (e) => {
@@ -1348,6 +1303,10 @@ function initPanelResize() {
     localStorage.setItem("scrolldrop-panel-w", String(w));
     document.body.style.cursor = "";
     document.body.style.userSelect = "";
+    syncPreviewLayout();
+    updateScrollPositionControls();
+    refreshTimeline();
+    applyBgEffects();
   };
 
   panelResizer.addEventListener("pointerdown", (e) => {
@@ -1508,10 +1467,15 @@ function serializeSettings() {
 }
 
 function serializeTextState() {
+  syncFromEditor();
+  const styledHtml = lastStyledHtml || textEditor.innerHTML;
   return {
     editMode: state.editMode,
-    styledHtml: lastStyledHtml || textEditor.innerHTML,
-    plainText: textPlain.value,
+    styledHtml,
+    plainText:
+      state.editMode === "plain"
+        ? textPlain.value
+        : htmlToPlain(styledHtml),
   };
 }
 
@@ -1522,6 +1486,7 @@ function serializeTimelineState() {
     startDelay: engine.startDelay,
     scrollFirstRow: engine.scrollFirstRow,
     scrollLastRow: engine.scrollLastRow,
+    measuredDurationSec: engine.getTotalDuration(),
   };
 }
 
@@ -1601,6 +1566,434 @@ async function buildSetupDocument(embedMedia) {
     ui: serializeUiState(),
     embedMedia,
   });
+}
+
+async function blobFromObjectUrl(url) {
+  if (!url) return null;
+  const res = await fetch(url);
+  return res.blob();
+}
+
+async function getMediaBlobsForCloud() {
+  const out = {};
+  if (state.hasBackgroundImage && bgImage.src) {
+    const fileName = cleanBgFileName($("bg-filename").textContent) || "background.jpg";
+    const blob = await blobFromObjectUrl(bgImage.currentSrc || bgImage.src);
+    out.background = {
+      blob,
+      fileName,
+      mimeType: blob.type || "image/jpeg",
+    };
+  }
+  const musicName = $("bg-music-filename").textContent;
+  if (bgMusic.src && !musicName.startsWith("No music")) {
+    const blob = await blobFromObjectUrl(bgMusic.currentSrc || bgMusic.src);
+    out.music = {
+      blob,
+      fileName: musicName,
+      mimeType: blob.type || "audio/mpeg",
+    };
+  }
+  const voiceName = $("bg-voice-filename").textContent;
+  if (bgVoice.src && !voiceName.startsWith("No voiceover")) {
+    const blob = await blobFromObjectUrl(bgVoice.currentSrc || bgVoice.src);
+    out.voiceover = {
+      blob,
+      fileName: voiceName,
+      mimeType: blob.type || "audio/mpeg",
+    };
+  }
+  return out;
+}
+
+async function runCloudExport(renderName = "") {
+  if (isCloudUploading) return;
+  isCloudUploading = true;
+
+  const progressEl = $("export-progress");
+  const progressFill = $("export-progress-fill");
+  const progressLabel = $("export-progress-label");
+  const progressHint = $("export-progress-hint");
+
+  progressEl.classList.remove("hidden");
+  progressHint.textContent = "Uploading to cloud queue — editor stays unlocked after upload.";
+  progressLabel.textContent = "Preparing cloud render…";
+  progressFill.style.width = "5%";
+
+  try {
+    syncFromEditor();
+    if (document.fonts?.ready) {
+      await document.fonts.ready;
+    }
+
+    const durationSec = refreshTimeline();
+    if (durationSec > LIMITS.maxDurationSec) {
+      throw new Error(
+        `Estimated duration ${durationSec.toFixed(1)}s exceeds ${LIMITS.maxDurationSec}s (30 min) cloud cap. Shorten text or increase scroll speed.`
+      );
+    }
+
+    const result = await startCloudRender({
+      renderName: renderName.trim() || defaultRenderName(),
+      buildDocument: () => buildSetupDocument(false),
+      getMediaBlobs: getMediaBlobsForCloud,
+      getIdToken,
+      onProgress: (pct) => {
+        progressFill.style.width = `${pct}%`;
+      },
+      onStatus: (msg) => {
+        progressLabel.textContent = msg;
+      },
+    });
+
+    openQueuePanel();
+    progressFill.style.width = "100%";
+    progressLabel.textContent = `Queued: ${result.renderName || result.jobId.slice(0, 8)}`;
+    playbackStatus.textContent = "Cloud render queued — track in queue panel";
+  } catch (err) {
+    console.error(err);
+    progressLabel.textContent = `Cloud export failed: ${err.message}`;
+    playbackStatus.textContent = "Cloud export failed";
+    alert(`Cloud export failed: ${err.message}`);
+  } finally {
+    isCloudUploading = false;
+    progressHint.textContent = "Track progress in the queue panel (header → Queue).";
+    setTimeout(() => progressEl.classList.add("hidden"), 5000);
+  }
+}
+
+function defaultRenderName() {
+  const now = new Date();
+  const stamp = now.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `Render ${stamp}`;
+}
+
+function openRenderNameDialog() {
+  const dialog = $("render-name-dialog");
+  const input = $("render-name-input");
+  if (!dialog?.showModal) {
+    runCloudExport();
+    return;
+  }
+  input.value = defaultRenderName();
+  dialog.showModal();
+  input.focus();
+  input.select();
+}
+
+function openQueuePanel() {
+  const panel = $("render-queue-panel");
+  const toggle = $("btn-queue-toggle");
+  panel?.classList.remove("hidden");
+  toggle?.setAttribute("aria-expanded", "true");
+  localStorage.setItem("scrolldrop-queue-open", "1");
+  ensurePolling();
+  requestAnimationFrame(() => syncPreviewLayout());
+}
+
+function closeQueuePanel() {
+  const panel = $("render-queue-panel");
+  const toggle = $("btn-queue-toggle");
+  panel?.classList.add("hidden");
+  toggle?.setAttribute("aria-expanded", "false");
+  localStorage.setItem("scrolldrop-queue-open", "0");
+  requestAnimationFrame(() => syncPreviewLayout());
+}
+
+function toggleQueuePanel() {
+  const panel = $("render-queue-panel");
+  if (panel?.classList.contains("hidden")) openQueuePanel();
+  else closeQueuePanel();
+}
+
+const REEDIT_STATUSES = new Set(["cancelled", "failed", "completed"]);
+
+function formatJobStatus(status) {
+  return String(status || "").replace(/_/g, " ");
+}
+
+function renderQueueCard(job) {
+  const card = document.createElement("article");
+  card.className = "render-queue-card";
+  card.dataset.jobId = job.jobId;
+
+  const title = document.createElement("p");
+  title.className = "render-queue-card-title";
+  title.textContent = job.renderName || `Render ${job.jobId.slice(0, 8)}`;
+
+  const status = document.createElement("span");
+  status.className = `render-queue-status is-${job.status}`;
+  status.textContent = formatJobStatus(job.status);
+
+  const meta = document.createElement("p");
+  meta.className = "render-queue-card-meta";
+  const parts = [];
+  if (job.segmentProgress?.total) {
+    parts.push(`part ${job.segmentProgress.completed}/${job.segmentProgress.total}`);
+  }
+  if (job.estimatedDurationSec) parts.push(`~${Math.round(job.estimatedDurationSec)}s video`);
+  if (job.progress && isActive(job.status)) parts.push(`${job.progress}%`);
+  if (job.statusMessage && isActive(job.status)) parts.push(job.statusMessage);
+  if (job.error) parts.push(job.error);
+  meta.textContent = parts.join(" · ") || `Job ${job.jobId.slice(0, 8)}`;
+
+  card.append(title, status, meta);
+
+  if (isActive(job.status)) {
+    const bar = document.createElement("div");
+    bar.className = "render-queue-progress";
+    const fill = document.createElement("div");
+    fill.style.width = `${Math.max(0, Math.min(100, job.progress || 0))}%`;
+    bar.append(fill);
+    card.append(bar);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "render-queue-card-actions";
+
+  if (isActive(job.status)) {
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "btn btn-secondary btn-sm";
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.addEventListener("click", async () => {
+      const msg =
+        job.status === "processing"
+          ? "Stop this render? Your project files will be kept."
+          : "Cancel this render?";
+      if (!confirm(msg)) return;
+      cancelBtn.disabled = true;
+      try {
+        await cancelJob(job.jobId, { getIdToken });
+      } catch (err) {
+        alert(err.message);
+        cancelBtn.disabled = false;
+      }
+    });
+    actions.append(cancelBtn);
+  }
+
+  if (job.status === "completed" && job.downloadUrl) {
+    const dlBtn = document.createElement("button");
+    dlBtn.type = "button";
+    dlBtn.className = "btn btn-primary btn-sm";
+    dlBtn.textContent = "Download";
+    dlBtn.addEventListener("click", () => {
+      triggerDownload(job.downloadUrl, `${(job.renderName || "scrolldrop-export").replace(/\W+/g, "-")}.mp4`);
+    });
+    actions.append(dlBtn);
+  }
+
+  appendReEditButton(actions, job);
+
+  if (job.status === "cancelled" || job.status === "failed") {
+    const retryBtn = document.createElement("button");
+    retryBtn.type = "button";
+    retryBtn.className = "btn btn-secondary btn-sm";
+    retryBtn.textContent = "Re-create";
+    retryBtn.addEventListener("click", async () => {
+      retryBtn.disabled = true;
+      try {
+        await retryJob(job.jobId, { getIdToken });
+      } catch (err) {
+        alert(err.message);
+        retryBtn.disabled = false;
+      }
+    });
+    actions.append(retryBtn);
+  }
+
+  appendDeleteButton(actions, job);
+
+  if (actions.childElementCount) card.append(actions);
+  return card;
+}
+
+function appendDeleteButton(actions, job) {
+  const deleteBtn = document.createElement("button");
+  deleteBtn.type = "button";
+  deleteBtn.className = "btn btn-secondary btn-sm render-queue-delete";
+  deleteBtn.textContent = "Delete";
+  deleteBtn.addEventListener("click", async () => {
+    const isActiveJob = isActive(job.status);
+    const msg = isActiveJob
+      ? "Stop this render and delete all files? This cannot be undone."
+      : "Delete this render and all files? This cannot be undone.";
+    if (!confirm(msg)) return;
+    deleteBtn.disabled = true;
+    try {
+      await deleteJob(job.jobId, { getIdToken });
+    } catch (err) {
+      alert(err.message);
+      deleteBtn.disabled = false;
+    }
+  });
+  actions.append(deleteBtn);
+}
+
+function appendReEditButton(actions, job) {
+  if (!REEDIT_STATUSES.has(job.status)) return;
+
+  const reEditBtn = document.createElement("button");
+  reEditBtn.type = "button";
+  reEditBtn.className = "btn btn-secondary btn-sm";
+  reEditBtn.textContent = "Re-Edit";
+  reEditBtn.addEventListener("click", () => reEditJobFromQueue(job.jobId, reEditBtn));
+  actions.append(reEditBtn);
+}
+
+async function reEditJobFromQueue(jobId, triggerBtn) {
+  if (isExporting || isCloudUploading) {
+    alert("Wait until the current export finishes.");
+    return;
+  }
+
+  const prevLabel = triggerBtn?.textContent;
+  if (triggerBtn) {
+    triggerBtn.disabled = true;
+    triggerBtn.textContent = "Loading…";
+  }
+  isImporting = true;
+
+  try {
+    const { setup } = await fetchJobSetup(jobId, { getIdToken });
+    const doc = parseProjectDocument(setup);
+    await applyProjectDocument(doc);
+    undoManager.reset();
+    playbackStatus.textContent = "Project loaded from render queue";
+  } catch (err) {
+    console.error(err);
+    alert(`Could not load project: ${err.message}`);
+    playbackStatus.textContent = "Re-Edit failed";
+  } finally {
+    isImporting = false;
+    if (triggerBtn) {
+      triggerBtn.disabled = false;
+      if (prevLabel != null) triggerBtn.textContent = prevLabel;
+    }
+  }
+}
+
+function renderQueueLists(groups) {
+  const empty = $("render-queue-empty");
+  const sections = [
+    { key: "active", el: $("render-queue-active"), section: $("render-queue-active-section") },
+    { key: "today", el: $("render-queue-today"), section: $("render-queue-today-section") },
+    { key: "last7", el: $("render-queue-week"), section: $("render-queue-week-section") },
+  ];
+
+  const hasAny =
+    groups.active.length + groups.today.length + groups.last7.length > 0;
+  empty?.classList.toggle("hidden", hasAny);
+
+  for (const { key, el, section } of sections) {
+    const jobs = groups[key === "last7" ? "last7" : key] || [];
+    if (!el || !section) continue;
+    el.replaceChildren(...jobs.map(renderQueueCard));
+    section.classList.toggle("hidden", jobs.length === 0);
+  }
+}
+
+function initRenderQueue() {
+  const pollOpts = { getIdToken };
+  startPolling(pollOpts);
+  const notifiedCompletions = new Set();
+
+  onQueueUpdate((groups) => {
+    renderQueueLists(groups);
+    for (const job of groups.all || []) {
+      if (
+        job.status === "completed" &&
+        job.downloadUrl &&
+        !notifiedCompletions.has(job.jobId)
+      ) {
+        notifiedCompletions.add(job.jobId);
+        playbackStatus.textContent = `Cloud render ready: ${job.renderName || job.jobId.slice(0, 8)}`;
+      }
+    }
+  });
+
+  $("btn-queue-toggle")?.addEventListener("click", toggleQueuePanel);
+  $("btn-queue-close")?.addEventListener("click", closeQueuePanel);
+
+  if (localStorage.getItem("scrolldrop-queue-open") === "1") {
+    openQueuePanel();
+  }
+
+  const nameDialog = $("render-name-dialog");
+  $("render-name-cancel")?.addEventListener("click", () => nameDialog?.close());
+  $("render-name-form")?.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const name = $("render-name-input")?.value || "";
+    nameDialog?.close();
+    await runCloudExport(name);
+  });
+}
+
+function openExportChoiceDialog() {
+  const dialog = $("export-choice-dialog");
+  if (!dialog?.showModal) {
+    runExport();
+    return;
+  }
+  dialog.showModal();
+}
+
+async function handleExportChoice(ev) {
+  ev?.preventDefault();
+  const dialog = $("export-choice-dialog");
+  const selected = dialog?.querySelector('input[name="export-target"]:checked')?.value || "browser";
+  dialog?.close();
+  if (selected === "cloud") {
+    openRenderNameDialog();
+  } else {
+    await runExport();
+  }
+}
+
+function initAuthUi() {
+  const signInBtn = $("btn-auth-signin");
+  const signOutBtn = $("btn-auth-signout");
+  const userEl = $("auth-user");
+
+  initAuth().then((state) => {
+    if (!state.enabled) return;
+    signInBtn?.classList.remove("hidden");
+    updateAuthUi();
+  });
+
+  signInBtn?.addEventListener("click", async () => {
+    try {
+      await signInWithGoogle();
+      updateAuthUi();
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+
+  signOutBtn?.addEventListener("click", async () => {
+    await signOut();
+    updateAuthUi();
+  });
+
+  function updateAuthUi() {
+    const user = getCurrentUser();
+    if (user) {
+      userEl.textContent = user.email || user.displayName || "Signed in";
+      userEl.classList.remove("hidden");
+      signInBtn?.classList.add("hidden");
+      signOutBtn?.classList.remove("hidden");
+    } else {
+      userEl.classList.add("hidden");
+      signInBtn?.classList.remove("hidden");
+      signOutBtn?.classList.add("hidden");
+    }
+  }
 }
 
 const STATE_MEDIA_KEYS = new Set(["bgUrl", "hasBackgroundImage"]);
@@ -1843,7 +2236,11 @@ async function exportSetupJson(options = {}) {
 }
 
 function initExport() {
-  $("btn-export").addEventListener("click", runExport);
+  $("btn-export").addEventListener("click", openExportChoiceDialog);
+
+  const dialog = $("export-choice-dialog");
+  dialog?.querySelector("form")?.addEventListener("submit", handleExportChoice);
+  $("export-choice-cancel")?.addEventListener("click", () => dialog?.close());
 
   const importInput = $("import-setup-file");
   $("btn-import-setup").addEventListener("click", () => importInput?.click());
@@ -1940,8 +2337,11 @@ function init() {
   initTimeline();
   initTransport();
   initExport();
+  initRenderQueue();
+  initAuthUi();
   setAspectRatio(state.aspectRatio);
   syncEngineDesignSpace();
+  syncPreviewLayout();
   syncFromEditor();
   applyBackground();
   engine.speed = state.scrollSpeed;
@@ -1949,16 +2349,20 @@ function init() {
   updateScrollPositionControls();
   engine.applyTime(0);
   refreshDuration();
+  requestAnimationFrame(() => {
+    syncPreviewLayout();
+    engine.applyTime(engine.timelineTime);
+  });
   updatePlayPauseButton();
   updateStyleHint(false);
   refreshToolbarFromSelection();
   setEffectPanelEnabled("stroke-controls", state.strokeEnabled);
   setEffectPanelEnabled("shadow-controls", state.shadowEnabled);
-  setEffectPanelEnabled("glow-controls", state.glowEnabled);
   setEffectPanelEnabled("color-overlay-controls", state.colorOverlayEnabled);
   setEffectPanelEnabled("vignette-controls", state.vignetteEnabled);
 
   window.addEventListener("resize", () => {
+    syncPreviewLayout();
     updateScrollPositionControls();
     refreshTimeline();
     applyBgEffects();

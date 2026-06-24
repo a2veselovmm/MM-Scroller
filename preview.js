@@ -1,5 +1,6 @@
 /**
  * requestAnimationFrame scroll engine with timeline seek/scrub support.
+ * Scroll coordinates are design pixels (same space as server export).
  */
 export class ScrollPreview {
   constructor(canvas, textEl, container) {
@@ -14,7 +15,7 @@ export class ScrollPreview {
     this.scrollLastRow = null;
     /** Logical canvas height (px); scroll settings use this coordinate system. */
     this.designHeight = 1920;
-    this.displayScale = 1;
+    this.designWidth = 1080;
     this.running = false;
     this.paused = false;
     this.y = 0;
@@ -30,22 +31,18 @@ export class ScrollPreview {
   }
 
   measure() {
-    const ch = this.container.clientHeight || 1;
-    const dh = this.designHeight || ch;
-    this.displayScale = ch / dh;
-    const thDisplay = Math.max(this.textEl.offsetHeight, 1);
-    const th = Math.max(thDisplay / this.displayScale, 1);
+    const dh = this.designHeight || this.container.clientHeight || 1;
     this.containerHeight = dh;
-    this.textHeight = th;
+    this.textHeight = Math.max(this.textEl.offsetHeight, 1);
     const firstRow = this.scrollFirstRow != null ? this.scrollFirstRow : dh;
     const lastRow = this.scrollLastRow != null ? this.scrollLastRow : 0;
     this.startY = firstRow;
-    this.endY = lastRow - th;
+    this.endY = lastRow - this.textHeight;
   }
 
-  /** Timeline Y in design px → CSS translateY for the on-screen preview. */
+  /** Timeline Y in design px → translateY inside the design stage. */
   getDisplayY(designY = this.y) {
-    return designY * this.displayScale;
+    return designY;
   }
 
   getScrollDuration() {

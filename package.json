@@ -1,0 +1,19 @@
+{
+  "name": "mm-scroller",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "deploy:hosting": "FIREBASE_TOOLS_DISABLE_UPDATE_CHECK=1 firebase deploy --only hosting",
+    "firebase": "firebase"
+  },
+  "devDependencies": {
+    "firebase-tools": "^15.22.1"
+  },
+  "overrides": {
+    "glob": "^13.0.6",
+    "uuid": "^11.1.0"
+  }
+}

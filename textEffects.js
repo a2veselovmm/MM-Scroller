@@ -29,43 +29,6 @@ export function buildTextStroke({ enabled, color, thickness, opacity }) {
   };
 }
 
-/** Layered glow shadows for radius + softness falloff */
-export function buildGlowShadowStack({ color, opacity, radius, softness }) {
-  const steps = Math.max(4, Math.round(softness / 12) + 2);
-  const layers = [];
-  for (let i = 1; i <= steps; i++) {
-    const t = i / steps;
-    const spread = Math.max(1, radius * t);
-    const falloff = 1 - Math.pow(t, 1.2 + (100 - softness) / 80);
-    const a = opacity * falloff;
-    if (a > 0.01) layers.push(`0 0 ${spread}px ${hexToRgba(color, a)}`);
-  }
-  return layers.length ? layers.join(", ") : "none";
-}
-
-/** CSS vars + rules for glow duplicate layer */
-export function applyGlowLayer(el, state) {
-  if (!el) return;
-  if (!state.glowEnabled) {
-    el.classList.add("hidden");
-    el.style.cssText = "";
-    return;
-  }
-  el.classList.remove("hidden");
-  el.style.setProperty("--glow-color", hexToRgba(state.glowColor, state.glowOpacity));
-  el.style.setProperty("--glow-blur", `${state.glowSharpness}px`);
-  el.style.setProperty("--glow-radius", String(state.glowRadius));
-  el.style.setProperty(
-    "--glow-shadow",
-    buildGlowShadowStack({
-      color: state.glowColor,
-      opacity: state.glowOpacity,
-      radius: state.glowRadius,
-      softness: state.glowSoftness,
-    })
-  );
-}
-
 export function strokeStylePayload(state) {
   if (!state.strokeEnabled) {
     return { webkitTextStroke: "initial", paintOrder: "initial" };

@@ -15,7 +15,14 @@
       ".gitattributes",
       "README.md",
       "vercel.json",
-      "skills-lock.json"
+      "skills-lock.json",
+      "server/api/**",
+      "server/worker/**",
+      "server/scripts/**",
+      "server/README.md",
+      "server/firestore.rules",
+      "cloudbuild.yaml",
+      "firebase-config.json"
     ],
     "headers": [
       {
@@ -30,6 +37,15 @@
             "value": "require-corp"
           }
         ]
+      }
+    ],
+    "rewrites": [
+      {
+        "source": "/api/**",
+        "run": {
+          "serviceId": "mm-scroller-api",
+          "region": "us-central1"
+        }
       }
     ]
   }

@@ -1,0 +1,23 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/api:latest
+      - -f
+      - server/api/Dockerfile
+      - server
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/worker:latest
+      - -f
+      - server/worker/Dockerfile
+      - server
+images:
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/api:latest
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/worker:latest
+substitutions:
+  _REGION: us-central1
+  _AR_REPO: mm-scroller

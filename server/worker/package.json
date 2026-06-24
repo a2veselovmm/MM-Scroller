@@ -1,0 +1,21 @@
+{
+  "name": "mm-scroller-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@google-cloud/firestore": "^8.6.0",
+    "@google-cloud/storage": "^7.21.0",
+    "@google-cloud/tasks": "^6.2.3",
+    "canvas": "^3.2.3",
+    "express": "^4.22.2"
+  },
+  "overrides": {
+    "glob": "^13.0.6",
+    "uuid": "^11.1.0"
+  }
+}

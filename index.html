@@ -17,6 +17,10 @@
       <h1>MM-Scroller</h1>
     </div>
     <div class="header-actions">
+      <span id="auth-user" class="auth-user hidden" aria-live="polite"></span>
+      <button type="button" id="btn-auth-signin" class="btn btn-secondary btn-sm hidden">Sign in with Google</button>
+      <button type="button" id="btn-auth-signout" class="btn btn-secondary btn-sm hidden">Sign out</button>
+      <button type="button" id="btn-queue-toggle" class="btn btn-secondary btn-sm" title="Render queue" aria-expanded="false" aria-controls="render-queue-panel">Queue</button>
       <button type="button" id="btn-export" class="btn btn-primary" title="1080p, 30 fps">Export MP4</button>
     </div>
   </header>
@@ -198,33 +202,6 @@
           <input type="range" id="shadow-softness" min="0" max="40" value="8" />
         </div>
 
-        <h3 class="control-subhead">Blur behind text</h3>
-        <label class="control-label checkbox-row">
-          <input type="checkbox" id="glow-enabled" />
-          Enable blur behind
-        </label>
-        <div id="glow-controls" class="effect-controls is-disabled">
-          <div class="control-row">
-            <label class="control-label" for="glow-color">Color</label>
-            <input type="color" id="glow-color" value="#000000" />
-            <label class="control-label inline" for="glow-opacity">
-              Opacity <span id="glow-opacity-val" class="value-badge">60%</span>
-            </label>
-            <input type="range" id="glow-opacity" min="0" max="100" value="60" />
-          </div>
-          <label class="control-label" for="glow-radius">
-            Radius <span id="glow-radius-val" class="value-badge">24px</span>
-          </label>
-          <input type="range" id="glow-radius" min="0" max="80" value="24" />
-          <label class="control-label" for="glow-sharpness">
-            Sharpness <span id="glow-sharpness-val" class="value-badge">12px</span>
-          </label>
-          <input type="range" id="glow-sharpness" min="0" max="40" value="12" />
-          <label class="control-label" for="glow-softness">
-            Softness <span id="glow-softness-val" class="value-badge">50</span>
-          </label>
-          <input type="range" id="glow-softness" min="0" max="100" value="50" />
-        </div>
         </div>
       </details>
       </div>
@@ -251,13 +228,6 @@
       <details class="collapsible" id="collapsible-bg-effects">
         <summary class="collapsible-summary">Background effects</summary>
         <div class="collapsible-body">
-        <h3 class="control-subhead">Blur overlay</h3>
-        <label class="control-label" for="blur">
-          Blur <span id="blur-val" class="value-badge">0px</span>
-        </label>
-        <input type="range" id="blur" min="0" max="24" value="0" />
-        <p class="hint">Blurs the image and effects below the text.</p>
-
         <h3 class="control-subhead">Overlay</h3>
         <label class="control-label checkbox-row">
           <input type="checkbox" id="color-overlay-enabled" />
@@ -387,6 +357,7 @@
     <div class="preview-area">
       <div id="preview-wrapper" class="preview-wrapper">
         <div id="preview-canvas" class="preview-canvas" data-aspect="9/16" aria-label="Preview canvas">
+          <div id="preview-stage" class="preview-stage">
           <div class="bg-layer" id="bg-layer">
             <div class="bg-placeholder" id="bg-placeholder">
               <span>Upload a background or use the gradient</span>
@@ -397,10 +368,9 @@
           </div>
           <div class="bg-vignette-layer hidden" id="bg-vignette-layer" aria-hidden="true"></div>
           <div class="bg-color-overlay hidden" id="bg-color-overlay" aria-hidden="true"></div>
-          <div class="overlay-layer" id="overlay-layer"></div>
           <div class="text-scroll-container" id="text-scroll-container">
-            <div id="text-glow-back" class="text-glow-back hidden" aria-hidden="true"></div>
             <div id="text-content" class="text-content"></div>
+          </div>
           </div>
         </div>
       </div>
@@ -433,7 +403,69 @@
         <p id="export-progress-hint" class="export-progress-hint">Keep this tab open until export finishes.</p>
       </div>
     </div>
+
+    <aside class="render-queue-panel hidden" id="render-queue-panel" aria-label="Render queue">
+      <div class="render-queue-header">
+        <h2>Render queue</h2>
+        <button type="button" id="btn-queue-close" class="btn btn-secondary btn-sm" aria-label="Close queue panel">×</button>
+      </div>
+      <div id="render-queue-body" class="render-queue-body">
+        <p class="render-queue-empty" id="render-queue-empty">No cloud renders yet. Send a video to the cloud queue to track progress here.</p>
+        <section class="render-queue-section hidden" id="render-queue-active-section">
+          <h3>Active</h3>
+          <div id="render-queue-active" class="render-queue-list"></div>
+        </section>
+        <section class="render-queue-section hidden" id="render-queue-today-section">
+          <h3>Today</h3>
+          <div id="render-queue-today" class="render-queue-list"></div>
+        </section>
+        <section class="render-queue-section hidden" id="render-queue-week-section">
+          <h3>Last 7 days</h3>
+          <div id="render-queue-week" class="render-queue-list"></div>
+        </section>
+      </div>
+    </aside>
   </main>
+
+  <dialog id="render-name-dialog" class="render-name-dialog">
+    <form method="dialog" class="render-name-form" id="render-name-form">
+      <h2>Name your render</h2>
+      <p class="render-name-lead">Optional label to find this render in the queue.</p>
+      <label class="field-label" for="render-name-input">Render name</label>
+      <input type="text" id="render-name-input" class="text-input" maxlength="120" placeholder="e.g. Product launch scroll" />
+      <div class="render-name-actions">
+        <button type="button" class="btn btn-secondary" id="render-name-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="render-name-confirm">Start cloud render</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="export-choice-dialog" class="export-choice-dialog">
+    <form method="dialog" class="export-choice-form">
+      <h2>Export MP4</h2>
+      <p class="export-choice-lead">Choose where to render your video (1080p, 30 fps).</p>
+      <fieldset class="export-choice-options">
+        <label class="export-choice-option">
+          <input type="radio" name="export-target" value="browser" checked />
+          <span>
+            <strong>Render in this tab</strong>
+            <small>Uses your browser. Keep this tab open until export finishes.</small>
+          </span>
+        </label>
+        <label class="export-choice-option">
+          <input type="radio" name="export-target" value="cloud" />
+          <span>
+            <strong>Send to cloud queue</strong>
+            <small>Uploads project to GCP and renders on the server. You can switch tabs.</small>
+          </span>
+        </label>
+      </fieldset>
+      <div class="export-choice-actions">
+        <button type="button" class="btn btn-secondary" id="export-choice-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="export-choice-confirm">Start export</button>
+      </div>
+    </form>
+  </dialog>
 
   <script type="module" src="app.js"></script>
 </body>
