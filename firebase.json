@@ -1,0 +1,36 @@
+{
+  "hosting": {
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**",
+      ".git",
+      ".git/**",
+      ".vercel/**",
+      ".firebase/**",
+      ".agents/**",
+      ".firebaserc",
+      ".gitignore",
+      ".gitattributes",
+      "README.md",
+      "vercel.json",
+      "skills-lock.json"
+    ],
+    "headers": [
+      {
+        "source": "**",
+        "headers": [
+          {
+            "key": "Cross-Origin-Opener-Policy",
+            "value": "same-origin"
+          },
+          {
+            "key": "Cross-Origin-Embedder-Policy",
+            "value": "require-corp"
+          }
+        ]
+      }
+    ]
+  }
+}
