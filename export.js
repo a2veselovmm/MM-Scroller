@@ -62,6 +62,35 @@ function segmentStyle(rootStyle, spanEl) {
   };
 }
 
+function segmentVerticalPadding(seg) {
+  const strokePad = Math.max(0, (Number(seg.strokeWidth) || 0) / 2);
+  if (!seg.shadow) return { top: strokePad, bottom: strokePad };
+  const blur = Math.max(0, Number(seg.shadow.blur) || 0);
+  const oy = Number(seg.shadow.oy) || 0;
+  return {
+    top: Math.max(strokePad, blur - oy + strokePad),
+    bottom: Math.max(strokePad, blur + oy + strokePad),
+  };
+}
+
+function measureRunPadding(layout) {
+  let top = 0;
+  let bottom = 0;
+  const rootSeg = segmentStyle(layout.rootStyle, null);
+  const rootPad = segmentVerticalPadding(rootSeg);
+  top = Math.max(top, rootPad.top);
+  bottom = Math.max(bottom, rootPad.bottom);
+  for (const run of layout.runs) {
+    const pad = segmentVerticalPadding(run);
+    top = Math.max(top, pad.top);
+    bottom = Math.max(bottom, pad.bottom);
+  }
+  return {
+    top: top > 0 ? Math.ceil(top + 2) : 0,
+    bottom: bottom > 0 ? Math.ceil(bottom + 2) : 0,
+  };
+}
+
 function drawSegment(ctx, seg, x, y) {
   ctx.save();
   ctx.font = seg.font;
@@ -177,12 +206,17 @@ function mergeCharBoxes(boxes, rootStyle) {
   return runs;
 }
 
-function drawTextFromDomLayout(ctx, textContent, originRect, canvasW, canvasH) {
+function collectTextLayout(textContent, originRect) {
   const rootStyle = getComputedStyle(textContent);
-  const padL = parseFloat(rootStyle.paddingLeft) || 0;
-  const padR = parseFloat(rootStyle.paddingRight) || 0;
   const boxes = collectCharBoxes(textContent, originRect);
   const runs = mergeCharBoxes(boxes, rootStyle);
+  const padL = parseFloat(rootStyle.paddingLeft) || 0;
+  const padR = parseFloat(rootStyle.paddingRight) || 0;
+  return { rootStyle, padL, padR, runs };
+}
+
+function drawTextFromDomLayout(ctx, layout, canvasW, canvasH, yOffset = 0) {
+  const { padL, padR, runs } = layout;
 
   ctx.save();
   ctx.beginPath();
@@ -190,7 +224,7 @@ function drawTextFromDomLayout(ctx, textContent, originRect, canvasW, canvasH) {
   ctx.clip();
 
   for (const run of runs) {
-    drawSegment(ctx, run, run.x, run.y);
+    drawSegment(ctx, run, run.x, run.y + yOffset);
   }
 
   ctx.restore();
@@ -274,27 +308,29 @@ function buildTextLayerCaches(textContent, w) {
   flushLayout(textContent);
 
   const originRect = textContent.getBoundingClientRect();
+  const layout = collectTextLayout(textContent, originRect);
+  const shadowPad = measureRunPadding(layout);
   const layerH = Math.max(1, Math.ceil(textContent.offsetHeight));
 
   const textCanvas = document.createElement("canvas");
   textCanvas.width = w;
-  textCanvas.height = layerH;
+  textCanvas.height = layerH + shadowPad.top + shadowPad.bottom;
   drawTextFromDomLayout(
     textCanvas.getContext("2d"),
-    textContent,
-    originRect,
+    layout,
     w,
-    layerH
+    textCanvas.height,
+    shadowPad.top
   );
 
   textContent.style.transform = savedTransform;
-  return { textCanvas };
+  return { textCanvas, textOffsetY: shadowPad.top };
 }
 
 function compositeFrame(
   ctx,
   ty,
-  { bgCache, textCanvas, w, h, ew, eh, drawScale, designHeight }
+  { bgCache, textCanvas, textOffsetY = 0, w, h, ew, eh, drawScale, designHeight }
 ) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(bgCache, 0, 0);
@@ -309,7 +345,7 @@ function compositeFrame(
   const tyLayout = ty * (h / designH);
 
   if (textCanvas) {
-    ctx.drawImage(textCanvas, 0, tyLayout);
+    ctx.drawImage(textCanvas, 0, tyLayout - textOffsetY);
   }
 
   ctx.restore();

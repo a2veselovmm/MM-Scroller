@@ -207,6 +207,33 @@ function drawRun(ctx, run, x, y, drawScale) {
   ctx.restore();
 }
 
+function styleVerticalPadding(style, drawScale) {
+  const strokePad = Math.max(0, ((Number(style.strokeWidth) || 0) * drawScale) / 2);
+  if (!style.shadow) return { top: strokePad, bottom: strokePad };
+  const blur = Math.max(0, (Number(style.shadow.blur) || 0) * drawScale);
+  const oy = (Number(style.shadow.oy) || 0) * drawScale;
+  return {
+    top: Math.max(strokePad, blur - oy + strokePad),
+    bottom: Math.max(strokePad, blur + oy + strokePad),
+  };
+}
+
+export function measureWrappedLinePadding(wrappedLines, drawScale) {
+  let top = 0;
+  let bottom = 0;
+  for (const line of wrappedLines) {
+    for (const run of line.runs) {
+      const pad = styleVerticalPadding(run.style, drawScale);
+      top = Math.max(top, pad.top);
+      bottom = Math.max(bottom, pad.bottom);
+    }
+  }
+  return {
+    top: top > 0 ? Math.ceil(top + 2) : 0,
+    bottom: bottom > 0 ? Math.ceil(bottom + 2) : 0,
+  };
+}
+
 function measureRunsWidth(ctx, runs, drawScale) {
   let width = 0;
   for (const run of runs) {
@@ -219,8 +246,8 @@ function measureRunsWidth(ctx, runs, drawScale) {
 /**
  * @param {import('canvas').CanvasRenderingContext2D} ctx
  */
-export function drawStyledLines(ctx, wrappedLines, { ew, paddingH, drawScale, align }) {
-  let y = 0;
+export function drawStyledLines(ctx, wrappedLines, { ew, paddingH, drawScale, align, offsetY = 0 }) {
+  let y = offsetY;
   for (const line of wrappedLines) {
     const lineWidth = measureRunsWidth(ctx, line.runs, drawScale);
     let x = paddingH * drawScale;
@@ -234,7 +261,7 @@ export function drawStyledLines(ctx, wrappedLines, { ew, paddingH, drawScale, al
     }
     y += line.lineHeightPx;
   }
-  return y;
+  return y - offsetY;
 }
 
 export function measureStyledDocument(styledHtml, settings, ew, drawScale, paddingH, align) {

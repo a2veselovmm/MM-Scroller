@@ -17,9 +17,6 @@
       <h1>MM-Scroller</h1>
     </div>
     <div class="header-actions">
-      <span id="auth-user" class="auth-user hidden" aria-live="polite"></span>
-      <button type="button" id="btn-auth-signin" class="btn btn-secondary btn-sm hidden">Sign in with Google</button>
-      <button type="button" id="btn-auth-signout" class="btn btn-secondary btn-sm hidden">Sign out</button>
       <button type="button" id="btn-queue-toggle" class="btn btn-secondary btn-sm" title="Render queue" aria-expanded="false" aria-controls="render-queue-panel">Queue</button>
       <button type="button" id="btn-export" class="btn btn-primary" title="1080p, 30 fps">Export MP4</button>
     </div>
@@ -410,7 +407,7 @@
         <button type="button" id="btn-queue-close" class="btn btn-secondary btn-sm" aria-label="Close queue panel">×</button>
       </div>
       <div id="render-queue-body" class="render-queue-body">
-        <p class="render-queue-empty" id="render-queue-empty">No cloud renders yet. Send a video to the cloud queue to track progress here.</p>
+        <p class="render-queue-empty" id="render-queue-empty">No render jobs yet. Start a cloud render or local script bundle export to track progress here.</p>
         <section class="render-queue-section hidden" id="render-queue-active-section">
           <h3>Active</h3>
           <div id="render-queue-active" class="render-queue-list"></div>
@@ -449,14 +446,21 @@
           <input type="radio" name="export-target" value="browser" checked />
           <span>
             <strong>Render in this tab</strong>
-            <small>Uses your browser. Keep this tab open until export finishes.</small>
+            <small>Uses your browser. Best for short 1-2 min scrollers.</small>
           </span>
         </label>
         <label class="export-choice-option">
           <input type="radio" name="export-target" value="cloud" />
           <span>
             <strong>Send to cloud queue</strong>
-            <small>Uploads project to GCP and renders on the server. You can switch tabs.</small>
+            <small>Uploads project to GCP. Best for batches and remote rendering.</small>
+          </span>
+        </label>
+        <label class="export-choice-option">
+          <input type="radio" name="export-target" value="local_script" />
+          <span>
+            <strong>Download render script</strong>
+            <small>Fastest option. Download a script bundle and render on your own PC/Mac.</small>
           </span>
         </label>
       </fieldset>

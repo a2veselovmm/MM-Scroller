@@ -76,10 +76,11 @@ function videoEncodeArgs(preset, crf) {
   ];
 }
 
-function buildScrollFilter(yExpr) {
+function buildScrollFilter(yExpr, textOffsetY = 0) {
+  const y = Number(textOffsetY) ? `(${yExpr})-${Number(textOffsetY)}` : yExpr;
   return [
     `[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[bg]`,
-    `[bg][1:v]overlay=x=0:y='${yExpr}':eval=frame:format=auto[vout]`,
+    `[bg][1:v]overlay=x=0:y='${y}':eval=frame:format=auto[vout]`,
   ].join(";");
 }
 
@@ -130,14 +131,15 @@ export async function encodeScrollSegment({
   startY,
   endY,
   speedY,
+  textOffsetY = 0,
   onFfmpegSpawn,
   onEncodeProgress,
 }) {
   const preset = process.env.CLOUD_ENCODE_PRESET || "ultrafast";
-  const crf = process.env.CLOUD_ENCODE_CRF || "23";
+  const crf = process.env.CLOUD_ENCODE_CRF || "28";
   const dur = Math.max(0.1, Number(segmentDuration) || 1);
   const yExpr = scrollYExpr({ startDelay, startY, endY, speedY, timeOffsetSec });
-  const filter = buildScrollFilter(yExpr);
+  const filter = buildScrollFilter(yExpr, textOffsetY);
 
   const args = ["-y"];
   args.push("-loop", "1", "-framerate", String(fps), "-t", String(dur), "-i", bgImagePath);
@@ -255,6 +257,7 @@ export async function encodeScrollVideo({
   startY,
   endY,
   speedY,
+  textOffsetY = 0,
   musicPath,
   voicePath,
   musicVolume = 100,
@@ -264,10 +267,10 @@ export async function encodeScrollVideo({
   onEncodeProgress,
 }) {
   const preset = process.env.CLOUD_ENCODE_PRESET || "ultrafast";
-  const crf = process.env.CLOUD_ENCODE_CRF || "23";
+  const crf = process.env.CLOUD_ENCODE_CRF || "28";
   const yExpr = scrollYExpr({ startDelay, startY, endY, speedY });
   const dur = Math.max(0.1, Number(totalDuration) || 1);
-  const filter = buildScrollFilter(yExpr);
+  const filter = buildScrollFilter(yExpr, textOffsetY);
 
   const args = ["-y"];
 

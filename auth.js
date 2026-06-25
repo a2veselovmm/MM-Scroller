@@ -5,16 +5,27 @@
 let auth = null;
 let initPromise = null;
 
+async function fetchConfigJson(url) {
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.apiKey ? data : null;
+  } catch {
+    return null;
+  }
+}
+
 async function loadConfig() {
   if (typeof window !== "undefined" && window.__FIREBASE_CONFIG__) {
     return window.__FIREBASE_CONFIG__;
   }
-  try {
-    const res = await fetch("/firebase-config.json", { cache: "no-store" });
-    if (res.ok) return res.json();
-  } catch {
-    /* not configured */
-  }
+  // Local explicit config (gitignored) has first priority.
+  const localConfig = await fetchConfigJson("/firebase-config.json");
+  if (localConfig) return localConfig;
+  // On Firebase Hosting, this endpoint serves web app config automatically.
+  const hostingConfig = await fetchConfigJson("/__/firebase/init.json");
+  if (hostingConfig) return hostingConfig;
   return null;
 }
 

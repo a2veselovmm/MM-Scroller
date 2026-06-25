@@ -19,3 +19,7 @@ export function getJobsCollection() {
 export function getRateLimitsCollection() {
   return getFirestore().collection("rateLimits");
 }
+
+export function getApprovedUsersCollection() {
+  return getFirestore().collection("approvedUsers");
+}

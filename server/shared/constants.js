@@ -14,14 +14,19 @@ export const LIMITS = {
 
 /** Cloud render segmentation tuning. */
 export const RENDER_LIMITS = {
-  segmentDurationSec: 60,
-  singlePassMaxSec: 300,
+  segmentDurationSec: 120,
+  singlePassMaxSec: 600,
   maxSegments: 30,
 };
 
 export const RENDER_MODE = {
   SINGLE: "single",
   SEGMENTED: "segmented",
+};
+
+export const RENDER_TARGET = {
+  CLOUD: "cloud",
+  LOCAL_SCRIPT: "local_script",
 };
 
 export const RENDER_PHASE = {

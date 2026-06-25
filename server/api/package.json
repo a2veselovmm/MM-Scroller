@@ -13,6 +13,7 @@
     "@google-cloud/secret-manager": "^6.1.0",
     "@google-cloud/storage": "^7.21.0",
     "@google-cloud/tasks": "^6.2.3",
+    "archiver": "^7.0.1",
     "express": "^4.22.2",
     "firebase-admin": "^13.6.1",
     "sharp": "^0.34.5",

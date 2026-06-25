@@ -35,6 +35,7 @@ export async function tryLoadStaging(bucket, jobId, inputHash, tmpDir) {
       textStripPath: textLocal,
       textStripWidth: meta.textWidth,
       textStripHeight: meta.textHeight,
+      textOffsetY: meta.textOffsetY || meta.scrollParams?.textOffsetY || 0,
       textStripIsRaw: true,
       scrollParams: meta.scrollParams || null,
       renderPlan: meta.renderPlan || null,
@@ -48,7 +49,7 @@ export async function tryLoadStaging(bucket, jobId, inputHash, tmpDir) {
  * @param {import("@google-cloud/storage").Bucket} bucket
  * @param {string} jobId
  * @param {string} inputHash
- * @param {{ bgImagePath: string, textStripPath: string, textStripWidth: number, textStripHeight: number, scrollParams?: object, renderPlan?: object }} assets
+ * @param {{ bgImagePath: string, textStripPath: string, textStripWidth: number, textStripHeight: number, textOffsetY?: number, scrollParams?: object, renderPlan?: object }} assets
  */
 export async function saveStaging(bucket, jobId, inputHash, assets) {
   const prefix = `staging/${jobId}/`;
@@ -56,6 +57,7 @@ export async function saveStaging(bucket, jobId, inputHash, assets) {
     inputHash,
     textWidth: assets.textStripWidth,
     textHeight: assets.textStripHeight,
+    textOffsetY: assets.textOffsetY || 0,
     savedAt: new Date().toISOString(),
   };
   if (assets.scrollParams) meta.scrollParams = assets.scrollParams;

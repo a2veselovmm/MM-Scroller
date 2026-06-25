@@ -131,7 +131,17 @@ export function onQueueUpdate(fn) {
  * Upload, enqueue, and track a cloud render. Non-blocking after upload completes.
  */
 export async function startCloudRender(opts) {
-  const result = await createAndUploadCloudJob(opts);
+  const result = await createAndUploadCloudJob({ ...opts, target: "cloud" });
+  trackJobId(result.jobId);
+  ensurePolling();
+  return result;
+}
+
+/**
+ * Upload assets and create a downloadable local render script bundle.
+ */
+export async function startLocalScriptRender(opts) {
+  const result = await createAndUploadCloudJob({ ...opts, target: "local_script" });
   trackJobId(result.jobId);
   ensurePolling();
   return result;

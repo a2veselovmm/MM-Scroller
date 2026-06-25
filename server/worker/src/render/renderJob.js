@@ -14,7 +14,11 @@ import {
 } from "./ffmpegScrollEncode.js";
 import { normalizeOpacity } from "./renderUtils.js";
 import { ScrollEngine } from "./scrollEngine.js";
-import { drawStyledLines, measureStyledDocument } from "./styledHtmlRender.js";
+import {
+  drawStyledLines,
+  measureStyledDocument,
+  measureWrappedLinePadding,
+} from "./styledHtmlRender.js";
 
 function stripHtml(html) {
   return String(html || "")
@@ -98,10 +102,11 @@ async function buildTextStrip({ text, settings, ew, drawScale, paddingH, align }
       paddingH,
       align
     );
-    const textCanvas = createCanvas(ew, Math.max(1, height));
+    const pad = measureWrappedLinePadding(wrapped, drawScale);
+    const textCanvas = createCanvas(ew, Math.max(1, Math.ceil(height + pad.top + pad.bottom)));
     const tctx = textCanvas.getContext("2d");
-    drawStyledLines(tctx, wrapped, { ew, paddingH, drawScale, align });
-    return { textCanvas, textHeight: height };
+    drawStyledLines(tctx, wrapped, { ew, paddingH, drawScale, align, offsetY: pad.top });
+    return { textCanvas, textHeight: height, textOffsetY: pad.top };
   }
 
   const plain = resolvePlainText(text);
@@ -142,7 +147,7 @@ async function buildTextStrip({ text, settings, ew, drawScale, paddingH, align }
     y += lineHeightPx;
   }
 
-  return { textCanvas, textHeight: Math.ceil(textHeight) + 20 };
+  return { textCanvas, textHeight: Math.ceil(textHeight) + 20, textOffsetY: 0 };
 }
 
 async function buildCanvasAssets({
@@ -172,7 +177,7 @@ async function buildCanvasAssets({
   onProgress(15, "Rendering text layer…");
   await checkCancelled();
   const canvasStart = Date.now();
-  const { textCanvas, textHeight } = await buildTextStrip({
+  const { textCanvas, textHeight, textOffsetY } = await buildTextStrip({
     text,
     settings,
     ew,
@@ -216,6 +221,7 @@ async function buildCanvasAssets({
     yScale,
     bgCache,
     textCanvas,
+    textOffsetY,
     ew,
     eh,
     timings: { fontsMs, canvasMs },
@@ -244,7 +250,7 @@ export async function prepareRenderAssets({
     onProgress,
     checkCancelled,
   });
-  const { engine, yScale, bgCache, textCanvas } = built;
+  const { engine, yScale, bgCache, textCanvas, textOffsetY } = built;
   const settings = project.settings || {};
 
   const totalDuration = engine.getTotalDuration();
@@ -255,6 +261,7 @@ export async function prepareRenderAssets({
     startDelay: engine.startDelay,
     totalDuration,
     fps: EXPORT_FPS,
+    textOffsetY,
   };
 
   const bgImagePath = path.join(workDir, "bg.jpg");
@@ -272,6 +279,7 @@ export async function prepareRenderAssets({
       textStripPath,
       textStripWidth: textCanvas.width,
       textStripHeight: textCanvas.height,
+      textOffsetY,
       scrollParams,
       renderPlan,
     },
@@ -312,6 +320,7 @@ export async function encodeRenderSegment({
     startY: scrollParams.startY,
     endY: scrollParams.endY,
     speedY: scrollParams.speedY,
+    textOffsetY: scrollParams.textOffsetY || 0,
     onFfmpegSpawn,
     onEncodeProgress,
   });
@@ -359,6 +368,7 @@ export async function renderJob({
   let endY;
   let speedY;
   let startDelay;
+  let textOffsetY = 0;
   const timings = { fontsMs: 0, canvasMs: 0, ffmpegMs: 0 };
 
   if (stagedAssets) {
@@ -368,6 +378,7 @@ export async function renderJob({
     textStripWidth = stagedAssets.textStripWidth;
     textStripHeight = stagedAssets.textStripHeight;
     textStripIsRaw = true;
+    textOffsetY = Number(stagedAssets.textOffsetY || stagedAssets.scrollParams?.textOffsetY || 0);
 
     const timeline = project.timeline || {};
     const text = project.text || {};
@@ -382,6 +393,13 @@ export async function renderJob({
     endY = engine.endY * yScale;
     speedY = engine.speed * yScale;
     startDelay = engine.startDelay;
+    if (stagedAssets.scrollParams) {
+      totalDuration = stagedAssets.scrollParams.totalDuration ?? totalDuration;
+      startY = stagedAssets.scrollParams.startY ?? startY;
+      endY = stagedAssets.scrollParams.endY ?? endY;
+      speedY = stagedAssets.scrollParams.speedY ?? speedY;
+      startDelay = stagedAssets.scrollParams.startDelay ?? startDelay;
+    }
   } else {
     const built = await buildCanvasAssets({
       project,
@@ -404,6 +422,7 @@ export async function renderJob({
     textStripWidth = textCanvas.width;
     textStripHeight = textCanvas.height;
     textStripIsRaw = true;
+    textOffsetY = Number(built.textOffsetY || 0);
 
     await writeJpeg(bgCache, bgImagePath);
     await writeRawRgba(textCanvas, textStripPath);
@@ -428,6 +447,7 @@ export async function renderJob({
     startY,
     endY,
     speedY,
+    textOffsetY,
     musicPath,
     voicePath,
     musicVolume: settings.musicVolume ?? 100,
@@ -469,6 +489,7 @@ export async function renderJob({
           textStripPath,
           textStripWidth,
           textStripHeight,
+          textOffsetY,
         },
   };
 }

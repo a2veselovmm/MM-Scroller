@@ -66,6 +66,29 @@ Set on API service: `REQUIRE_BETA_KEY=true` and pass header `X-MM-Beta-Key` from
 3. Deploy hosting (config is gitignored)
 4. Enable auth requirement on API: `REQUIRE_AUTH=true`, optional `AUTH_ALLOWED_DOMAIN=thebbco.com`
 
+### Manual user approval (Google SSO)
+
+Deploy script defaults:
+
+- `REQUIRE_AUTH=false`
+- `REQUIRE_APPROVAL=false`
+- `AUTO_APPROVE_DOMAINS=` (empty)
+
+This means the app is open to everyone by default.
+
+Approval records are stored in Firestore collection `approvedUsers`:
+
+- First signed-in request from a new user creates/updates a doc with `status: "pending"`.
+- To approve a user, set either:
+  - `approved: true`, or
+  - `status: "approved"`
+- Recommended doc id is the Firebase `uid`.
+
+If user is not approved, API returns `403 Account pending approval.`.
+
+Users with emails in `AUTO_APPROVE_DOMAINS` are auto-approved on first request.
+Use comma-separated domains (for example: `maneuvermarketing.com,example.com`).
+
 ## Local API dev
 
 ```bash

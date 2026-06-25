@@ -1,6 +1,7 @@
-import { initAuth, signInWithGoogle, signOut, getIdToken, getCurrentUser } from "./auth.js";
+import { getIdToken } from "./auth.js";
 import {
   startCloudRender,
+  startLocalScriptRender,
   onQueueUpdate,
   startPolling,
   ensurePolling,
@@ -143,6 +144,7 @@ let isScrubbing = false;
 let lastStyledHtml = "";
 let plainOnModeEnter = "";
 let fontPickerApi = null;
+let pendingQueuedExportTarget = "cloud";
 
 const undoManager = createUndoManager(captureUndoSnapshot, applyUndoSnapshot);
 
@@ -1662,6 +1664,55 @@ async function runCloudExport(renderName = "") {
   }
 }
 
+async function runLocalScriptExport(renderName = "") {
+  if (isCloudUploading) return;
+  isCloudUploading = true;
+
+  const progressEl = $("export-progress");
+  const progressFill = $("export-progress-fill");
+  const progressLabel = $("export-progress-label");
+  const progressHint = $("export-progress-hint");
+
+  progressEl.classList.remove("hidden");
+  progressHint.textContent = "Uploading setup and building local render script bundle…";
+  progressLabel.textContent = "Preparing local render bundle…";
+  progressFill.style.width = "5%";
+
+  try {
+    syncFromEditor();
+    if (document.fonts?.ready) {
+      await document.fonts.ready;
+    }
+
+    const result = await startLocalScriptRender({
+      renderName: renderName.trim() || defaultRenderName(),
+      buildDocument: () => buildSetupDocument(false),
+      getMediaBlobs: getMediaBlobsForCloud,
+      getIdToken,
+      onProgress: (pct) => {
+        progressFill.style.width = `${pct}%`;
+      },
+      onStatus: (msg) => {
+        progressLabel.textContent = msg;
+      },
+    });
+
+    openQueuePanel();
+    progressFill.style.width = "100%";
+    progressLabel.textContent = `Queued: ${result.renderName || result.jobId.slice(0, 8)}`;
+    playbackStatus.textContent = "Local render script bundle queued — track in queue panel";
+  } catch (err) {
+    console.error(err);
+    progressLabel.textContent = `Local bundle failed: ${err.message}`;
+    playbackStatus.textContent = "Local bundle failed";
+    alert(`Local bundle failed: ${err.message}`);
+  } finally {
+    isCloudUploading = false;
+    progressHint.textContent = "Track progress in the queue panel (header → Queue).";
+    setTimeout(() => progressEl.classList.add("hidden"), 5000);
+  }
+}
+
 function defaultRenderName() {
   const now = new Date();
   const stamp = now.toLocaleString(undefined, {
@@ -1673,12 +1724,21 @@ function defaultRenderName() {
   return `Render ${stamp}`;
 }
 
-function openRenderNameDialog() {
+function openRenderNameDialog(target = "cloud") {
   const dialog = $("render-name-dialog");
   const input = $("render-name-input");
+  const confirmBtn = $("render-name-confirm");
+  pendingQueuedExportTarget = target === "local_script" ? "local_script" : "cloud";
   if (!dialog?.showModal) {
-    runCloudExport();
+    if (pendingQueuedExportTarget === "local_script") runLocalScriptExport();
+    else runCloudExport();
     return;
+  }
+  if (confirmBtn) {
+    confirmBtn.textContent =
+      pendingQueuedExportTarget === "local_script"
+        ? "Create local script bundle"
+        : "Start cloud render";
   }
   input.value = defaultRenderName();
   dialog.showModal();
@@ -1717,10 +1777,25 @@ function formatJobStatus(status) {
   return String(status || "").replace(/_/g, " ");
 }
 
+function queueCardOpenStorageKey(jobId) {
+  return `scrolldrop-queue-card-open:${jobId}`;
+}
+
+function shouldQueueCardBeOpen(job) {
+  const saved = localStorage.getItem(queueCardOpenStorageKey(job.jobId));
+  if (saved === "1") return true;
+  if (saved === "0") return false;
+  return isActive(job.status);
+}
+
 function renderQueueCard(job) {
-  const card = document.createElement("article");
+  const card = document.createElement("details");
   card.className = "render-queue-card";
   card.dataset.jobId = job.jobId;
+  card.open = shouldQueueCardBeOpen(job);
+
+  const summary = document.createElement("summary");
+  summary.className = "render-queue-card-summary";
 
   const title = document.createElement("p");
   title.className = "render-queue-card-title";
@@ -1730,9 +1805,17 @@ function renderQueueCard(job) {
   status.className = `render-queue-status is-${job.status}`;
   status.textContent = formatJobStatus(job.status);
 
+  summary.append(title, status);
+  card.append(summary);
+
+  const body = document.createElement("div");
+  body.className = "render-queue-card-body";
+
   const meta = document.createElement("p");
   meta.className = "render-queue-card-meta";
   const parts = [];
+  if (job.creatorUsername) parts.push(`by ${job.creatorUsername}`);
+  parts.push(job.target === "local_script" ? "local script" : "cloud");
   if (job.segmentProgress?.total) {
     parts.push(`part ${job.segmentProgress.completed}/${job.segmentProgress.total}`);
   }
@@ -1741,8 +1824,7 @@ function renderQueueCard(job) {
   if (job.statusMessage && isActive(job.status)) parts.push(job.statusMessage);
   if (job.error) parts.push(job.error);
   meta.textContent = parts.join(" · ") || `Job ${job.jobId.slice(0, 8)}`;
-
-  card.append(title, status, meta);
+  body.append(meta);
 
   if (isActive(job.status)) {
     const bar = document.createElement("div");
@@ -1750,7 +1832,7 @@ function renderQueueCard(job) {
     const fill = document.createElement("div");
     fill.style.width = `${Math.max(0, Math.min(100, job.progress || 0))}%`;
     bar.append(fill);
-    card.append(bar);
+    body.append(bar);
   }
 
   const actions = document.createElement("div");
@@ -1784,7 +1866,9 @@ function renderQueueCard(job) {
     dlBtn.className = "btn btn-primary btn-sm";
     dlBtn.textContent = "Download";
     dlBtn.addEventListener("click", () => {
-      triggerDownload(job.downloadUrl, `${(job.renderName || "scrolldrop-export").replace(/\W+/g, "-")}.mp4`);
+      const baseName = (job.renderName || "scrolldrop-export").replace(/\W+/g, "-");
+      const ext = job.target === "local_script" ? "zip" : "mp4";
+      triggerDownload(job.downloadUrl, `${baseName}.${ext}`);
     });
     actions.append(dlBtn);
   }
@@ -1810,7 +1894,13 @@ function renderQueueCard(job) {
 
   appendDeleteButton(actions, job);
 
-  if (actions.childElementCount) card.append(actions);
+  if (actions.childElementCount) body.append(actions);
+
+  card.append(body);
+  card.addEventListener("toggle", () => {
+    localStorage.setItem(queueCardOpenStorageKey(job.jobId), card.open ? "1" : "0");
+  });
+
   return card;
 }
 
@@ -1913,7 +2003,11 @@ function initRenderQueue() {
         !notifiedCompletions.has(job.jobId)
       ) {
         notifiedCompletions.add(job.jobId);
-        playbackStatus.textContent = `Cloud render ready: ${job.renderName || job.jobId.slice(0, 8)}`;
+        const label = job.renderName || job.jobId.slice(0, 8);
+        playbackStatus.textContent =
+          job.target === "local_script"
+            ? `Local render bundle ready: ${label}`
+            : `Cloud render ready: ${label}`;
       }
     }
   });
@@ -1931,7 +2025,11 @@ function initRenderQueue() {
     ev.preventDefault();
     const name = $("render-name-input")?.value || "";
     nameDialog?.close();
-    await runCloudExport(name);
+    if (pendingQueuedExportTarget === "local_script") {
+      await runLocalScriptExport(name);
+    } else {
+      await runCloudExport(name);
+    }
   });
 }
 
@@ -1949,51 +2047,15 @@ async function handleExportChoice(ev) {
   const dialog = $("export-choice-dialog");
   const selected = dialog?.querySelector('input[name="export-target"]:checked')?.value || "browser";
   dialog?.close();
-  if (selected === "cloud") {
-    openRenderNameDialog();
-  } else {
-    await runExport();
+  if (selected === "cloud" || selected === "local_script") {
+    openRenderNameDialog(selected);
+    return;
   }
+  await runExport();
 }
 
 function initAuthUi() {
-  const signInBtn = $("btn-auth-signin");
-  const signOutBtn = $("btn-auth-signout");
-  const userEl = $("auth-user");
-
-  initAuth().then((state) => {
-    if (!state.enabled) return;
-    signInBtn?.classList.remove("hidden");
-    updateAuthUi();
-  });
-
-  signInBtn?.addEventListener("click", async () => {
-    try {
-      await signInWithGoogle();
-      updateAuthUi();
-    } catch (err) {
-      alert(err.message);
-    }
-  });
-
-  signOutBtn?.addEventListener("click", async () => {
-    await signOut();
-    updateAuthUi();
-  });
-
-  function updateAuthUi() {
-    const user = getCurrentUser();
-    if (user) {
-      userEl.textContent = user.email || user.displayName || "Signed in";
-      userEl.classList.remove("hidden");
-      signInBtn?.classList.add("hidden");
-      signOutBtn?.classList.remove("hidden");
-    } else {
-      userEl.classList.add("hidden");
-      signInBtn?.classList.remove("hidden");
-      signOutBtn?.classList.add("hidden");
-    }
-  }
+  // Authentication intentionally disabled: app is open for everyone.
 }
 
 const STATE_MEDIA_KEYS = new Set(["bgUrl", "hasBackgroundImage"]);

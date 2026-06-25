@@ -17,6 +17,12 @@ API_SA="mm-scroller-api@${PROJECT_ID}.iam.gserviceaccount.com"
 WORKER_SA="mm-scroller-worker@${PROJECT_ID}.iam.gserviceaccount.com"
 TASKS_SA="mm-scroller-tasks@${PROJECT_ID}.iam.gserviceaccount.com"
 QUEUE="mm-scroller-render"
+CLOUD_ENCODE_PRESET="${CLOUD_ENCODE_PRESET:-ultrafast}"
+CLOUD_ENCODE_CRF="${CLOUD_ENCODE_CRF:-28}"
+REQUIRE_AUTH="${REQUIRE_AUTH:-false}"
+REQUIRE_APPROVAL="${REQUIRE_APPROVAL:-false}"
+AUTH_ALLOWED_DOMAIN="${AUTH_ALLOWED_DOMAIN:-}"
+AUTO_APPROVE_DOMAINS="${AUTO_APPROVE_DOMAINS:-}"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
@@ -44,7 +50,7 @@ if [[ "${SKIP_WORKER:-}" != "1" ]]; then
     --timeout=3600 \
     --max-instances=3 \
     --min-instances="$WORKER_MIN_INSTANCES" \
-    --set-env-vars="GCP_PROJECT_ID=${PROJECT_ID},GCS_BUCKET=${BUCKET},FIRESTORE_DATABASE=(default)"
+    --set-env-vars="GCP_PROJECT_ID=${PROJECT_ID},GCS_BUCKET=${BUCKET},FIRESTORE_DATABASE=(default),CLOUD_ENCODE_PRESET=${CLOUD_ENCODE_PRESET},CLOUD_ENCODE_CRF=${CLOUD_ENCODE_CRF}"
 else
   echo "==> Skipping worker deploy (SKIP_WORKER=1)"
 fi
@@ -56,7 +62,7 @@ echo "==> Updating worker task-chaining env..."
 gcloud run services update mm-scroller-worker \
   --region="$REGION" \
   --project="$PROJECT_ID" \
-  --set-env-vars="GCP_PROJECT_ID=${PROJECT_ID},GCS_BUCKET=${BUCKET},GCP_REGION=${REGION},CLOUD_TASKS_QUEUE=${QUEUE},WORKER_URL=${WORKER_URL},TASKS_SA_EMAIL=${TASKS_SA},FIRESTORE_DATABASE=(default)" \
+  --set-env-vars="GCP_PROJECT_ID=${PROJECT_ID},GCS_BUCKET=${BUCKET},GCP_REGION=${REGION},CLOUD_TASKS_QUEUE=${QUEUE},WORKER_URL=${WORKER_URL},TASKS_SA_EMAIL=${TASKS_SA},FIRESTORE_DATABASE=(default),CLOUD_ENCODE_PRESET=${CLOUD_ENCODE_PRESET},CLOUD_ENCODE_CRF=${CLOUD_ENCODE_CRF}" \
   --quiet
 
 ENV_FILE="$(mktemp)"
@@ -72,6 +78,10 @@ ALLOWED_ORIGINS: "https://mm-anton-sandbox.web.app,https://mm-anton-sandbox.fire
 FIRESTORE_DATABASE: "(default)"
 JOBS_PER_HOUR: "20"
 JOBS_PER_DAY: "100"
+REQUIRE_AUTH: "${REQUIRE_AUTH}"
+REQUIRE_APPROVAL: "${REQUIRE_APPROVAL}"
+AUTH_ALLOWED_DOMAIN: "${AUTH_ALLOWED_DOMAIN}"
+AUTO_APPROVE_DOMAINS: "${AUTO_APPROVE_DOMAINS}"
 EOF
 
 echo "==> Deploying API..."

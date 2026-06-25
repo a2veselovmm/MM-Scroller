@@ -74,13 +74,15 @@ export async function createAndUploadCloudJob(opts) {
     buildDocument,
     getMediaBlobs,
     renderName,
+    target = "cloud",
     getIdToken = async () => null,
     betaKey,
     onProgress = () => {},
     onStatus = () => {},
   } = opts;
 
-  onStatus("Preparing cloud render job…");
+  const isLocalScript = target === "local_script";
+  onStatus(isLocalScript ? "Preparing local render bundle job…" : "Preparing cloud render job…");
   onProgress(2);
 
   const project = await buildDocument();
@@ -101,7 +103,7 @@ export async function createAndUploadCloudJob(opts) {
 
   const created = await apiFetch("/jobs", {
     method: "POST",
-    body: { project, files, renderName },
+    body: { project, files, renderName, target },
     getIdToken,
     betaKey,
   });
@@ -136,9 +138,10 @@ export async function createAndUploadCloudJob(opts) {
     onProgress(10 + Math.round((uploadStep / uploadTotal) * 30));
   }
 
-  onStatus("Starting render queue…");
+  onStatus(isLocalScript ? "Building local render bundle…" : "Starting render queue…");
   onProgress(45);
-  await apiFetch(`/jobs/${jobId}/start`, {
+  const startPath = isLocalScript ? `/jobs/${jobId}/start-local` : `/jobs/${jobId}/start`;
+  await apiFetch(startPath, {
     method: "POST",
     body: { project },
     getIdToken,
@@ -146,10 +149,11 @@ export async function createAndUploadCloudJob(opts) {
   });
 
   onProgress(50);
-  onStatus("Queued for cloud render");
+  onStatus(isLocalScript ? "Render script bundle queued" : "Queued for cloud render");
 
   return {
     jobId,
+    target,
     renderName: created.renderName || renderName || null,
     estimatedDurationSec: created.estimatedDurationSec,
   };
@@ -202,7 +206,10 @@ export async function fetchJob(jobId, { getIdToken, betaKey } = {}) {
 }
 
 export async function fetchJobs({ getIdToken, betaKey, ids } = {}) {
-  const query = ids?.length ? `?ids=${encodeURIComponent(ids.join(","))}` : "";
+  const params = new URLSearchParams();
+  if (ids?.length) params.set("ids", ids.join(","));
+  if (getIdToken) params.set("includeGlobalLocal", "1");
+  const query = params.size ? `?${params.toString()}` : "";
   return apiFetch(`/jobs${query}`, { getIdToken, betaKey });
 }
 
