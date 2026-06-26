@@ -1,6 +1,6 @@
 # MM-Scroller
 
-Browser-based tool to place animated scrolling text over an image or video background, with music and voiceover. No server, no install. Export as MP4.
+Browser-based tool to place animated scrolling text over an image or video background, with music and voiceover. Supports browser export, GCP cloud queue rendering, and downloadable local render bundles.
 
 ## Features
 
@@ -32,19 +32,49 @@ python3 -m http.server 8080
 
 Open `http://localhost:8080` (or the port shown). ES modules require HTTP — `file://` will not work.
 
-## Deploy to Vercel
+## Render options
 
-1. Push this repo to GitHub.
-2. In the [Vercel dashboard](https://vercel.com), import the project.
-3. Framework preset: **Other** (static site, no build).
-4. Root directory: `.` — output is the repo root (`index.html` at top level).
+### 1) Render in this tab (browser export)
 
-Or from the CLI (after `vercel login`):
+- Best for short videos and quick iterations
+- Uses ffmpeg.wasm in the browser
+
+### 2) Send to cloud queue (GCP)
+
+- Uploads project + media and renders on Cloud Run workers
+- Best for longer renders and when you want background processing
+
+### 3) Download render script (local bundle)
+
+- Creates a ZIP bundle with project JSON, media, required fonts, renderer runtime, and OS scripts
+- Best when you want to use your own machine resources for rendering
+- Prerequisites on target machine:
+  - Node.js 20+
+  - npm
+  - ffmpeg available in `PATH`
+- Run:
+  - macOS/Linux: `scripts/run-macos.sh`
+  - Windows: `scripts/run-windows.bat`
+
+Output MP4 is generated next to the bundle by default (`local-render-output.mp4`).
+
+## Deploy to GCP
+
+See `server/README.md` for the full backend guide. Quick path:
 
 ```bash
-vercel
-vercel --prod
+# one-time provisioning
+chmod +x server/scripts/provision-gcp.sh server/scripts/deploy.sh server/scripts/enable-hosting-api.sh
+./server/scripts/provision-gcp.sh
+
+# deploy API + worker (Cloud Run) and patch firebase rewrite
+./server/scripts/deploy.sh
+
+# deploy frontend (Firebase Hosting)
+npm run deploy:hosting
 ```
+
+Cloud queue requires both Cloud Run services and Hosting rewrite to `/api/**`.
 
 ## Project structure
 
@@ -64,7 +94,7 @@ vercel --prod
 ## Browser notes
 
 - Best export experience: **Chrome** or **Edge**
-- MP4 export downloads ffmpeg.wasm on first use (~25 MB); needs COOP/COEP headers (`vercel.json` included for Vercel deploys)
+- MP4 export downloads ffmpeg.wasm on first use (~25 MB); needs COOP/COEP headers (configured in `firebase.json`)
 - Export renders each frame at a fixed timeline position, then encodes at 30 fps
 - Boomerang background preview in-browser is limited to around 10 FPS due to browser seek constraints
 
