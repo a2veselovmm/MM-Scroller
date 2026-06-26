@@ -66,7 +66,8 @@ gcloud run services update mm-scroller-worker \
   --quiet
 
 ENV_FILE="$(mktemp)"
-trap 'rm -f "$ENV_FILE"' EXIT
+CORS_FILE="$(mktemp)"
+trap 'rm -f "$ENV_FILE" "$CORS_FILE"' EXIT
 cat >"$ENV_FILE" <<EOF
 GCP_PROJECT_ID: "${PROJECT_ID}"
 GCP_REGION: "${REGION}"
@@ -82,6 +83,20 @@ REQUIRE_AUTH: "${REQUIRE_AUTH}"
 REQUIRE_APPROVAL: "${REQUIRE_APPROVAL}"
 AUTH_ALLOWED_DOMAIN: "${AUTH_ALLOWED_DOMAIN}"
 AUTO_APPROVE_DOMAINS: "${AUTO_APPROVE_DOMAINS}"
+EOF
+
+cat >"$CORS_FILE" <<EOF
+[
+  {
+    "origin": [
+      "https://mm-anton-sandbox.web.app",
+      "https://mm-anton-sandbox.firebaseapp.com"
+    ],
+    "method": ["GET", "HEAD", "PUT", "POST", "OPTIONS"],
+    "responseHeader": ["Content-Type", "x-goog-resumable"],
+    "maxAgeSeconds": 3600
+  }
+]
 EOF
 
 echo "==> Deploying API..."
@@ -103,6 +118,9 @@ gcloud run services add-iam-policy-binding mm-scroller-worker \
   --region="$REGION" --project="$PROJECT_ID" \
   --member="serviceAccount:${TASKS_SA}" \
   --role="roles/run.invoker" --quiet
+
+echo "==> Ensuring GCS CORS for signed browser uploads..."
+gcloud storage buckets update "gs://${BUCKET}" --cors-file="$CORS_FILE"
 
 echo ""
 echo "API URL:    $API_URL"

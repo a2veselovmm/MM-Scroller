@@ -7,6 +7,8 @@ Browser-based tool to place animated scrolling text over an image or video backg
 - Multi-line text with blank-line spacers
 - **Background media**: images (JPG, PNG, WebP) and videos (MP4, MOV)
 - Video playback modes for shorter clips: loop or boomerang
+- Queue render options: cloud render and downloadable local render bundle
+- Boomerang queued renders (cloud/local) start from frame 0 of the uploaded background clip
 - **Music** upload (MP3, WAV) with volume control
 - **Voiceover** upload (MP3, WAV) with volume control
 - Font picker (32 curated Google Fonts), size, color, opacity, alignment
@@ -64,6 +66,7 @@ vercel --prod
 - Best export experience: **Chrome** or **Edge**
 - MP4 export downloads ffmpeg.wasm on first use (~25 MB); needs COOP/COEP headers (`vercel.json` included for Vercel deploys)
 - Export renders each frame at a fixed timeline position, then encodes at 30 fps
+- Boomerang background preview in-browser is limited to around 10 FPS due to browser seek constraints
 
 ## License
 

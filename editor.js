@@ -212,7 +212,6 @@ export function applyLayoutStyles(editor, preview, layout) {
     el.style.letterSpacing = `${letterSpacing}px`;
     el.style.paddingLeft = `${paddingH}px`;
     el.style.paddingRight = `${paddingH}px`;
-    el.style.width = "100%";
     el.style.boxSizing = "border-box";
     if (defaultTextShadow != null) el.style.textShadow = defaultTextShadow;
     if (defaultStroke?.webkitTextStroke) {

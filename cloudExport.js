@@ -1,9 +1,22 @@
 /**
- * Cloud render queue client — uploads project + media via same-origin API proxy.
- * Direct GCS signed-URL uploads are blocked by COEP (require-corp) on the hosting page.
+ * Cloud render queue client — uploads project + media via signed GCS URLs when available.
+ * Falls back to same-origin API proxy uploads for compatibility.
  */
+import { LIMITS } from "./server/shared/constants.js";
 
 const DEFAULT_API = "/api";
+
+function formatMb(bytes) {
+  return (bytes / (1024 * 1024)).toFixed(1);
+}
+
+function isBackgroundVideoUpload(field, item) {
+  if (field !== "background" || !item?.blob) return false;
+  const mime = String(item.mimeType || item.blob.type || "").toLowerCase();
+  if (mime.startsWith("video/")) return true;
+  const name = String(item.fileName || "").toLowerCase();
+  return name.endsWith(".mp4") || name.endsWith(".mov");
+}
 
 export function apiBase() {
   return (typeof window !== "undefined" && window.__MM_SCROLLER_API__) || DEFAULT_API;
@@ -61,7 +74,31 @@ async function putToJobApi(jobId, field, blob, contentType, { getIdToken, betaKe
 
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
+    if (
+      field === "background" &&
+      blob?.size > LIMITS.maxProxyUploadBytes &&
+      (res.status >= 500 || res.status === 413)
+    ) {
+      throw new Error(
+        `Background video is ${formatMb(blob.size)}MB. Current cloud upload path supports up to ~${formatMb(LIMITS.maxProxyUploadBytes)}MB per file.`
+      );
+    }
     throw new Error(data.error || `Upload failed for ${field} (${res.status})`);
+  }
+}
+
+async function putToSignedUploadUrl(url, blob, contentType) {
+  const headers = {
+    "Content-Type": contentType || blob.type || "application/octet-stream",
+  };
+  const res = await fetch(url, {
+    method: "PUT",
+    mode: "cors",
+    headers,
+    body: blob,
+  });
+  if (!res.ok) {
+    throw new Error(`Signed upload failed (${res.status})`);
   }
 }
 
@@ -119,20 +156,37 @@ export async function createAndUploadCloudJob(opts) {
   let uploadStep = 0;
   const uploadTotal = uploadFields.length || 1;
   const uploadOpts = { getIdToken, betaKey };
+  const signedUploadUrls = created.uploadUrls || {};
 
   for (const field of uploadFields) {
+    let blob;
+    let mimeType;
     if (field === "project") {
-      const json = JSON.stringify(project);
-      await putToJobApi(
-        jobId,
-        "project",
-        new Blob([json], { type: "application/json" }),
-        "application/json",
-        uploadOpts
-      );
+      blob = new Blob([JSON.stringify(project)], { type: "application/json" });
+      mimeType = "application/json";
     } else {
       const item = mediaBlobs[field];
-      await putToJobApi(jobId, field, item.blob, item.mimeType, uploadOpts);
+      blob = item.blob;
+      mimeType = item.mimeType;
+    }
+
+    const signedUrl = signedUploadUrls[field];
+    let uploaded = false;
+    if (signedUrl) {
+      try {
+        await putToSignedUploadUrl(signedUrl, blob, mimeType);
+        uploaded = true;
+      } catch (signedErr) {
+        if (field === "background" && blob?.size > LIMITS.maxProxyUploadBytes) {
+          throw new Error(
+            `Background video is ${formatMb(blob.size)}MB and signed browser upload failed (${signedErr.message}). Please retry or use Download render script.`
+          );
+        }
+      }
+    }
+
+    if (!uploaded) {
+      await putToJobApi(jobId, field, blob, mimeType, uploadOpts);
     }
     uploadStep += 1;
     onProgress(10 + Math.round((uploadStep / uploadTotal) * 30));

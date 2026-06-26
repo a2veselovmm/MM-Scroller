@@ -820,6 +820,7 @@ function syncPreviewLayout() {
   });
   engine.designWidth = layout.designWidth;
   engine.designHeight = layout.designHeight;
+  syncStyledEditorScale(layout.previewScale, layout.designWidth);
   return layout;
 }
 
@@ -831,6 +832,18 @@ function getDesignDimensions() {
 function getPreviewDisplayScale() {
   const layout = readPreviewLayoutFromDom();
   return layout.previewScale;
+}
+
+function syncStyledEditorScale(previewScale = 1, designWidth = null) {
+  const scale = Number.isFinite(previewScale) ? previewScale : 1;
+  const safeScale = Math.min(1, Math.max(0.1, scale));
+  const fallbackDesignWidth = getDesignCanvasSize(state.aspectRatio).width;
+  const safeDesignWidth = Math.max(
+    1,
+    Math.round(Number.isFinite(designWidth) ? designWidth : fallbackDesignWidth)
+  );
+  textEditorWrap.style.setProperty("--styled-editor-scale", safeScale.toFixed(4));
+  textEditorWrap.style.setProperty("--styled-editor-design-width", `${safeDesignWidth}px`);
 }
 
 function readPreviewLayoutFromDom() {
@@ -1660,6 +1673,7 @@ function serializeSettings() {
   const { bgUrl: _bgUrl, ...settings } = state;
   return {
     ...settings,
+    backgroundVideoMode: state.bgVideoMode,
     scrollFirstRow: state.scrollFirstRow,
     scrollLastRow: state.scrollLastRow,
   };
@@ -2286,6 +2300,10 @@ function applySettingsFromDocument(settings) {
   if (!settings || typeof settings !== "object") return;
 
   const legacyScrollKeys = new Set(["scrollStartY", "scrollEndY", "scrollEndAuto"]);
+  if ("backgroundVideoMode" in settings && !("bgVideoMode" in settings)) {
+    state.bgVideoMode =
+      settings.backgroundVideoMode === "boomerang" ? "boomerang" : "loop";
+  }
 
   for (const [key, value] of Object.entries(settings)) {
     if (STATE_MEDIA_KEYS.has(key)) continue;

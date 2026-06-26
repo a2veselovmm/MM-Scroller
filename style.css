@@ -440,6 +440,8 @@ input[type="color"] {
 
 .editor-surface {
   position: relative;
+  --styled-editor-scale: 1;
+  --styled-editor-design-width: 1080px;
 }
 
 .text-editor,
@@ -465,6 +467,22 @@ input[type="color"] {
   font-size: 18px;
   color: #fff;
   text-align: center;
+}
+
+.editor-surface[data-mode="styled"] .text-editor {
+  transform: scale(var(--styled-editor-scale));
+  transform-origin: top left;
+  width: calc(var(--styled-editor-design-width) + 2px);
+  max-width: none;
+  min-height: calc(160px / var(--styled-editor-scale));
+  max-height: calc(280px / var(--styled-editor-scale));
+}
+
+.editor-surface[data-mode="styled"] {
+  min-height: 160px;
+  max-height: 280px;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .text-plain {

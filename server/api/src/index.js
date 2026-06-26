@@ -20,7 +20,7 @@ app.use(corsMiddleware(config));
 // Binary job uploads must be parsed before express.json (project JSON uses application/json).
 app.use((req, res, next) => {
   if (req.method === "PUT" && /\/api\/jobs\/[^/]+\/upload\//.test(req.path)) {
-    return express.raw({ type: "*/*", limit: LIMITS.maxBackgroundVideoBytes })(req, res, next);
+    return express.raw({ type: "*/*", limit: LIMITS.maxProxyUploadBytes })(req, res, next);
   }
   next();
 });

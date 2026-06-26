@@ -100,8 +100,11 @@ function isVideoBackgroundPath(filePath) {
   return ext === ".mp4" || ext === ".mov";
 }
 
-function backgroundVideoMode(settings = {}) {
-  return settings.backgroundVideoMode === "boomerang" ? "boomerang" : "loop";
+function backgroundVideoMode(settings = {}, media = {}) {
+  if (settings.backgroundVideoMode === "boomerang") return "boomerang";
+  if (settings.bgVideoMode === "boomerang") return "boomerang";
+  if (media?.background?.playbackMode === "boomerang") return "boomerang";
+  return "loop";
 }
 
 async function buildTextStrip({ text, settings, ew, drawScale, paddingH, align }) {
@@ -454,7 +457,7 @@ export async function renderJob({
         onFfmpegSpawn,
       });
 
-      const mode = backgroundVideoMode(settings);
+      const mode = backgroundVideoMode(settings, project.media || {});
       if (mode === "boomerang") {
         const boomerangBg = path.join(workDir, "bg-video-boomerang.mp4");
         await createBoomerangVideo({

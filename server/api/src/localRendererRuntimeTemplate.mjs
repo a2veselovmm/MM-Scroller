@@ -543,6 +543,13 @@ function mapPlaybackTime(t, duration, mode = "loop") {
   return modTime(t, duration);
 }
 
+function resolveBackgroundVideoMode(settings = {}, media = {}) {
+  if (settings.backgroundVideoMode === "boomerang") return "boomerang";
+  if (settings.bgVideoMode === "boomerang") return "boomerang";
+  if (media?.background?.playbackMode === "boomerang") return "boomerang";
+  return "loop";
+}
+
 function runFfprobe(args) {
   return new Promise((resolve, reject) => {
     const proc = spawn("ffprobe", args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -592,7 +599,7 @@ async function prepareBackgroundVideo(inputPath, outputPath, ew, eh, fitMode = "
     inputPath,
     "-an",
     "-filter:v",
-    `${scaleFilter},format=yuv420p`,
+    `${scaleFilter},setpts=PTS-STARTPTS,format=yuv420p`,
     "-c:v",
     "libx264",
     "-preset",
@@ -613,11 +620,9 @@ async function createBoomerangVideo(inputPath, outputPath) {
     inputPath,
     "-an",
     "-filter_complex",
-    "[0:v]split[fwd][rev];[rev]reverse[r];[fwd][r]concat=n=2:v=1:a=0[v]",
+    "[0:v]setpts=PTS-STARTPTS,split[fwd][rev];[rev]reverse,setpts=PTS-STARTPTS[r];[fwd][r]concat=n=2:v=1:a=0,format=yuv420p[v]",
     "-map",
     "[v]",
-    "-pix_fmt",
-    "yuv420p",
     "-c:v",
     "libx264",
     "-preset",
@@ -717,8 +722,7 @@ async function main() {
         eh,
         settings.fitMode || "cover"
       );
-      const playbackMode =
-        settings.backgroundVideoMode === "boomerang" ? "boomerang" : "loop";
+      const playbackMode = resolveBackgroundVideoMode(settings, project.media || {});
       if (playbackMode === "boomerang") {
         const boomerangBg = path.join(tmpDir, "background-video-boomerang.mp4");
         await createBoomerangVideo(preparedBg, boomerangBg);
@@ -735,13 +739,7 @@ async function main() {
 
     if (bgRenderPath) {
       if (bgIsVideo) {
-        const startOffset = mapPlaybackTime(
-          Number(timeline.position || 0),
-          bgVideoDuration,
-          settings.backgroundVideoMode === "boomerang" ? "boomerang" : "loop"
-        );
         args.push("-stream_loop", "-1");
-        if (startOffset > 0) args.push("-ss", String(startOffset));
         args.push("-t", String(totalDuration), "-i", bgRenderPath);
       } else {
         args.push(
