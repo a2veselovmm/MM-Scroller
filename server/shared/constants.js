@@ -4,8 +4,8 @@ export const PROJECT_FORMAT_VERSION = 1;
 export const LIMITS = {
   maxProjectJsonBytes: 1 * 1024 * 1024,
   maxFileBytes: 15 * 1024 * 1024,
-  maxBackgroundVideoBytes: 30 * 1024 * 1024,
-  maxTotalBytes: 80 * 1024 * 1024,
+  maxBackgroundVideoBytes: 100 * 1024 * 1024,
+  maxTotalBytes: 130 * 1024 * 1024,
   maxDurationSec: 1800,
   jobsPerHour: 3,
   jobsPerDay: 10,
