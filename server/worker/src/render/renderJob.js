@@ -6,9 +6,12 @@ import { segmentTimeRange } from "../../shared/renderPlan.js";
 import { ensureFontsForProject, resolveFontFamily } from "../fonts/localFonts.js";
 import { drawColorOverlay, drawVignette, readBgEffects } from "./backgroundEffects.js";
 import {
+  createBoomerangVideo,
   concatSegmentsAndMuxAudio,
   encodeScrollSegment,
   encodeScrollVideo,
+  prepareBackgroundVideo,
+  probeVideoDurationSec,
   writeJpeg,
   writeRawRgba,
 } from "./ffmpegScrollEncode.js";
@@ -89,6 +92,16 @@ function resolvePlainText(text) {
     return null;
   }
   return text.plainText || stripHtml(text.styledHtml);
+}
+
+function isVideoBackgroundPath(filePath) {
+  if (!filePath) return false;
+  const ext = path.extname(String(filePath)).toLowerCase();
+  return ext === ".mp4" || ext === ".mov";
+}
+
+function backgroundVideoMode(settings = {}) {
+  return settings.backgroundVideoMode === "boomerang" ? "boomerang" : "loop";
 }
 
 async function buildTextStrip({ text, settings, ew, drawScale, paddingH, align }) {
@@ -242,6 +255,9 @@ export async function prepareRenderAssets({
   renderPlan = null,
 }) {
   await mkdir(workDir, { recursive: true });
+  if (isVideoBackgroundPath(backgroundPath)) {
+    throw new Error("Segmented render staging is not supported for video backgrounds.");
+  }
 
   const built = await buildCanvasAssets({
     project,
@@ -369,6 +385,8 @@ export async function renderJob({
   let speedY;
   let startDelay;
   let textOffsetY = 0;
+  let backgroundIsVideo = false;
+  let backgroundDurationSec = 0;
   const timings = { fontsMs: 0, canvasMs: 0, ffmpegMs: 0 };
 
   if (stagedAssets) {
@@ -416,15 +434,43 @@ export async function renderJob({
     endY = engine.endY * yScale;
     speedY = engine.speed * yScale;
     startDelay = engine.startDelay;
-
-    bgImagePath = path.join(workDir, "bg.jpg");
     textStripPath = path.join(workDir, "text.raw");
     textStripWidth = textCanvas.width;
     textStripHeight = textCanvas.height;
     textStripIsRaw = true;
     textOffsetY = Number(built.textOffsetY || 0);
 
-    await writeJpeg(bgCache, bgImagePath);
+    const videoBackgroundPath = isVideoBackgroundPath(backgroundPath) ? backgroundPath : null;
+    if (videoBackgroundPath) {
+      backgroundIsVideo = true;
+      const fitMode = settings.fitMode || "cover";
+      const preparedBg = path.join(workDir, "bg-video-prepared.mp4");
+      await prepareBackgroundVideo({
+        inputPath: videoBackgroundPath,
+        outputPath: preparedBg,
+        width: built.ew,
+        height: built.eh,
+        fitMode,
+        onFfmpegSpawn,
+      });
+
+      const mode = backgroundVideoMode(settings);
+      if (mode === "boomerang") {
+        const boomerangBg = path.join(workDir, "bg-video-boomerang.mp4");
+        await createBoomerangVideo({
+          inputPath: preparedBg,
+          outputPath: boomerangBg,
+          onFfmpegSpawn,
+        });
+        bgImagePath = boomerangBg;
+      } else {
+        bgImagePath = preparedBg;
+      }
+      backgroundDurationSec = await probeVideoDurationSec(bgImagePath);
+    } else {
+      bgImagePath = path.join(workDir, "bg.jpg");
+      await writeJpeg(bgCache, bgImagePath);
+    }
     await writeRawRgba(textCanvas, textStripPath);
   }
 
@@ -436,6 +482,8 @@ export async function renderJob({
 
   await encodeScrollVideo({
     bgImagePath,
+    backgroundIsVideo,
+    backgroundDurationSec,
     textStripPath,
     textStripWidth,
     textStripHeight,
@@ -482,7 +530,7 @@ export async function renderJob({
     frameCount: Math.max(1, Math.ceil(totalDuration * fps)),
     outputPath,
     timings,
-    stagingAssets: stagedAssets
+    stagingAssets: stagedAssets || backgroundIsVideo
       ? null
       : {
           bgImagePath,

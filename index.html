@@ -205,13 +205,26 @@
 
       <div id="tab-panel-background" class="control-tab-panel" role="tabpanel" aria-labelledby="control-tab-background" hidden>
       <details class="collapsible" id="collapsible-bg-image" open>
-        <summary class="collapsible-summary">Image</summary>
+        <summary class="collapsible-summary">Background media</summary>
         <div class="collapsible-body">
         <label class="control-label file-upload">
-          <span class="btn btn-secondary btn-block">Upload background image</span>
-          <input type="file" id="bg-upload" accept="image/jpeg,image/png,image/webp" hidden />
+          <span class="btn btn-secondary btn-block">Upload background image/video</span>
+          <input type="file" id="bg-upload" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,.mp4,.mov" hidden />
         </label>
         <p id="bg-filename" class="hint">No file — gradient placeholder</p>
+        <p class="hint">Cloud size limits: background video up to 30 MB; music/voiceover up to 15 MB each.</p>
+
+        <div id="bg-video-options" class="hidden">
+          <label class="control-label" for="bg-video-mode">If video is shorter than timeline</label>
+          <select id="bg-video-mode">
+            <option value="loop">Loop</option>
+            <option value="boomerang">Boomerang</option>
+          </select>
+          <p class="hint">Loop restarts from frame 1. Boomerang plays forward then backward repeatedly.</p>
+          <p id="bg-boomerang-preview-warning" class="hint hidden">
+            Boomerang preview is limited to ~10 FPS due to browser technical limitations.
+          </p>
+        </div>
 
         <label class="control-label" for="fit-mode">Fit mode</label>
         <select id="fit-mode">
@@ -360,6 +373,7 @@
               <span>Upload a background or use the gradient</span>
             </div>
             <img id="bg-image" class="bg-media hidden" alt="" />
+            <video id="bg-video" class="bg-media hidden" muted playsinline preload="auto"></video>
             <audio id="bg-music" class="hidden" preload="auto"></audio>
             <audio id="bg-voice" class="hidden" preload="auto"></audio>
           </div>
@@ -447,6 +461,9 @@
           <span>
             <strong>Render in this tab</strong>
             <small>Uses your browser. Best for short 1-2 min scrollers.</small>
+            <small id="export-choice-browser-video-warning" class="export-choice-warning hidden">
+              Video background detected: browser render may take extremely long and can fail on some machines.
+            </small>
           </span>
         </label>
         <label class="export-choice-option">
@@ -454,6 +471,7 @@
           <span>
             <strong>Send to cloud queue</strong>
             <small>Uploads project to GCP. Best for batches and remote rendering.</small>
+            <small>Cloud limits: background video up to 30 MB; music/voiceover up to 15 MB each.</small>
           </span>
         </label>
         <label class="export-choice-option">

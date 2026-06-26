@@ -38,6 +38,7 @@ import {
   applyMediaVolume,
   syncBgAudioToTimeline,
 } from "./audioSync.js";
+import { mapBackgroundTime } from "./backgroundMedia.js";
 import {
   hasSelectionIn,
   applyStyleToSelection,
@@ -95,6 +96,9 @@ const state = {
   aspectRatio: "9/16",
   bgUrl: null,
   hasBackgroundImage: false,
+  bgMediaType: "image",
+  bgVideoMode: "loop",
+  bgVideoDuration: 0,
   bold: false,
   italic: false,
   editMode: "styled",
@@ -116,12 +120,15 @@ const viewLabelPlain = $("view-label-plain");
 const viewLabelStyled = $("view-label-styled");
 const textContainer = $("text-scroll-container");
 const bgImage = $("bg-image");
+const bgVideo = $("bg-video");
 const bgMusic = $("bg-music");
 const bgVoice = $("bg-voice");
 const bgPlaceholder = $("bg-placeholder");
 
 let bgMusicObjectUrl = null;
 let bgVoiceObjectUrl = null;
+let bgVideoSeekInFlight = false;
+let bgVideoQueuedTime = null;
 const bgVignetteLayer = $("bg-vignette-layer");
 const bgColorOverlay = $("bg-color-overlay");
 const playbackStatus = $("playback-status");
@@ -212,6 +219,7 @@ function applyUndoSnapshot(snap) {
 function applyStateToControls() {
   $("aspect-ratio").value = state.aspectRatio;
   $("fit-mode").value = state.fitMode;
+  $("bg-video-mode").value = state.bgVideoMode;
 
   $("font-size").value = String(state.fontSize);
   $("font-size-val").textContent = `${state.fontSize}px`;
@@ -266,6 +274,11 @@ function applyStateToControls() {
   $("music-loop").checked = state.musicLoop;
   $("bg-voice-volume").value = String(state.voiceVolume);
   $("bg-voice-volume-val").textContent = `${state.voiceVolume}%`;
+  $("bg-video-options").classList.toggle(
+    "hidden",
+    !(state.hasBackgroundImage && state.bgMediaType === "video")
+  );
+  syncBgBoomerangWarning();
 
   setEffectPanelEnabled("stroke-controls", state.strokeEnabled);
   setEffectPanelEnabled("shadow-controls", state.shadowEnabled);
@@ -281,6 +294,16 @@ function applyStateToControls() {
   applyMediaVolume(bgMusic, state.musicVolume);
   applyMediaVolume(bgVoice, state.voiceVolume);
   bgMusic.loop = state.musicLoop;
+}
+
+function syncBgBoomerangWarning() {
+  const warning = $("bg-boomerang-preview-warning");
+  if (!warning) return;
+  const show =
+    state.hasBackgroundImage &&
+    state.bgMediaType === "video" &&
+    state.bgVideoMode === "boomerang";
+  warning.classList.toggle("hidden", !show);
 }
 
 engine.onStatus = (s) => {
@@ -618,7 +641,91 @@ function syncAudioTrack(el, time, volume, { isPlaying = false, mode = "loop" } =
   syncBgAudioToTimeline(el, time, dur, mode, isPlaying, volume);
 }
 
+function resetBgVideoSeekState() {
+  bgVideoSeekInFlight = false;
+  bgVideoQueuedTime = null;
+}
+
+function applyBgVideoSeek(targetTime) {
+  try {
+    bgVideo.currentTime = Math.max(0, Number(targetTime) || 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function queueBgVideoSeek(targetTime) {
+  if (!Number.isFinite(targetTime)) return;
+  const safeTarget = Math.max(0, targetTime);
+  if (!bgVideoSeekInFlight) {
+    bgVideoSeekInFlight = true;
+    if (!applyBgVideoSeek(safeTarget)) {
+      bgVideoSeekInFlight = false;
+    }
+    return;
+  }
+  bgVideoQueuedTime = safeTarget;
+}
+
+function handleBgVideoSeeked() {
+  if (!bgVideoSeekInFlight) return;
+  bgVideoSeekInFlight = false;
+  const queued = bgVideoQueuedTime;
+  bgVideoQueuedTime = null;
+  if (!Number.isFinite(queued)) return;
+  if (Math.abs((bgVideo.currentTime || 0) - queued) <= 0.01) return;
+  bgVideoSeekInFlight = true;
+  if (!applyBgVideoSeek(queued)) {
+    bgVideoSeekInFlight = false;
+  }
+}
+
+function syncBackgroundVideo(time, { isPlaying = false } = {}) {
+  if (!state.hasBackgroundImage || state.bgMediaType !== "video" || !bgVideo?.src) return;
+  const dur = state.bgVideoDuration || bgVideo.duration;
+  if (!dur || !Number.isFinite(dur)) return;
+  const mode = state.bgVideoMode === "boomerang" ? "boomerang" : "loop";
+  const target = mapBackgroundTime(time, dur, mode);
+
+  if (mode === "loop" && isPlaying) {
+    resetBgVideoSeekState();
+    bgVideo.loop = true;
+    const drift = Math.abs((bgVideo.currentTime || 0) - target);
+    if (!Number.isFinite(bgVideo.currentTime) || drift > 0.35) {
+      try {
+        bgVideo.currentTime = target;
+      } catch {
+        /* ignore seek errors until metadata is ready */
+      }
+    }
+    if (bgVideo.paused || bgVideo.ended) {
+      bgVideo.play().catch(() => {});
+    }
+    return;
+  }
+
+  bgVideo.loop = false;
+  bgVideo.pause();
+  if (mode === "boomerang") {
+    if (!Number.isFinite(bgVideo.currentTime) || Math.abs(bgVideo.currentTime - target) > 0.02) {
+      queueBgVideoSeek(target);
+    }
+    return;
+  }
+
+  resetBgVideoSeekState();
+  if (!Number.isFinite(bgVideo.currentTime) || Math.abs(bgVideo.currentTime - target) > 0.04) {
+    try {
+      bgVideo.currentTime = target;
+    } catch {
+      /* ignore seek errors until metadata is ready */
+    }
+  }
+}
+
 function syncTimelineAudio(time, { isPlaying = false } = {}) {
+  syncBackgroundVideo(time, { isPlaying });
   syncAudioTrack(bgMusic, time, state.musicVolume, {
     isPlaying,
     mode: state.musicLoop ? "loop" : "once",
@@ -634,6 +741,7 @@ function applyMusicLoop() {
 }
 
 function pauseTimelineAudio() {
+  if (bgVideo.src) bgVideo.pause();
   if (bgMusic.src) bgMusic.pause();
   if (bgVoice.src) bgVoice.pause();
 }
@@ -830,6 +938,8 @@ function applyBackground() {
   const fit = state.fitMode;
   bgImage.dataset.fit = fit;
   bgImage.style.objectFit = fit === "fill" ? "fill" : fit;
+  bgVideo.dataset.fit = fit;
+  bgVideo.style.objectFit = fit === "fill" ? "fill" : fit;
 
   applyBgEffects();
   engine.applyTime(engine.timelineTime);
@@ -847,10 +957,20 @@ function clearBackground() {
   bgSourceUrl = null;
   state.bgUrl = null;
   state.hasBackgroundImage = false;
+  state.bgMediaType = "image";
+  state.bgVideoDuration = 0;
   bgImage.classList.add("hidden");
   bgImage.removeAttribute("src");
+  bgVideo.classList.add("hidden");
+  bgVideo.pause();
+  bgVideo.removeAttribute("src");
+  bgVideo.load();
+  resetBgVideoSeekState();
+  $("bg-video-options").classList.add("hidden");
+  syncBgBoomerangWarning();
   bgPlaceholder.classList.remove("hidden");
   $("bg-filename").textContent = "No file — gradient placeholder";
+  syncExportChoiceHints();
 }
 
 async function applyBackgroundDisplayUrl(displayUrl) {
@@ -859,12 +979,59 @@ async function applyBackgroundDisplayUrl(displayUrl) {
   bgImage.src = displayUrl;
   bgImage.classList.remove("hidden");
   bgPlaceholder.classList.add("hidden");
+  syncExportChoiceHints();
+  requestAnimationFrame(() => remeasureAndApply());
+  applyBackground();
+}
+
+function isVideoBackgroundFile(file) {
+  const type = String(file?.type || "").toLowerCase();
+  if (type.startsWith("video/")) return true;
+  const name = String(file?.name || "").toLowerCase();
+  return name.endsWith(".mp4") || name.endsWith(".mov");
+}
+
+async function applyBackgroundVideoUrl(displayUrl) {
+  state.bgUrl = displayUrl;
+  state.hasBackgroundImage = true;
+  state.bgMediaType = "video";
+  $("bg-video-options").classList.remove("hidden");
+  bgImage.classList.add("hidden");
+  bgImage.removeAttribute("src");
+  bgVideo.classList.remove("hidden");
+  bgPlaceholder.classList.add("hidden");
+  resetBgVideoSeekState();
+  syncBgBoomerangWarning();
+  syncExportChoiceHints();
+
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("Could not load background video."));
+    };
+    bgVideo.onloadedmetadata = done;
+    bgVideo.onerror = fail;
+    bgVideo.src = displayUrl;
+    bgVideo.load();
+  });
+
+  state.bgVideoDuration = Number.isFinite(bgVideo.duration) ? bgVideo.duration : 0;
+  syncBackgroundVideo(engine.timelineTime, {
+    isPlaying: false,
+  });
   requestAnimationFrame(() => remeasureAndApply());
   applyBackground();
 }
 
 async function refreshBackgroundRaster() {
-  if (!bgSourceUrl || !state.hasBackgroundImage) return;
+  if (!bgSourceUrl || !state.hasBackgroundImage || state.bgMediaType !== "image") return;
 
   try {
     const img = await loadImageElement(bgSourceUrl);
@@ -886,9 +1053,13 @@ async function refreshBackgroundRaster() {
 }
 
 async function loadBackground(file) {
-  const allowed = ["image/jpeg", "image/png", "image/webp"];
-  if (!allowed.includes(file.type)) {
-    alert("Background must be a still image (JPG, PNG, or WebP).");
+  const imageTypes = ["image/jpeg", "image/png", "image/webp"];
+  const videoTypes = ["video/mp4", "video/quicktime"];
+  const isVideo = isVideoBackgroundFile(file);
+  const isImage = imageTypes.includes(file.type);
+  const typeAllowed = isVideo || isImage || videoTypes.includes(file.type);
+  if (!typeAllowed) {
+    alert("Background must be JPG, PNG, WebP, MP4, or MOV.");
     return;
   }
 
@@ -897,18 +1068,25 @@ async function loadBackground(file) {
 
   const sourceUrl = URL.createObjectURL(file);
   bgSourceUrl = sourceUrl;
-  state.hasBackgroundImage = true;
   $("bg-filename").textContent = file.name;
 
   try {
-    const img = await loadImageElement(sourceUrl);
-    const optimized = await rasterizeBackgroundToCanvasSize(
-      img,
-      state.aspectRatio,
-      state.fitMode
-    );
-    bgObjectUrl = optimized ?? sourceUrl;
-    await applyBackgroundDisplayUrl(bgObjectUrl);
+    if (isVideo) {
+      bgObjectUrl = sourceUrl;
+      await applyBackgroundVideoUrl(sourceUrl);
+    } else {
+      state.bgMediaType = "image";
+      $("bg-video-options").classList.add("hidden");
+      const img = await loadImageElement(sourceUrl);
+      const optimized = await rasterizeBackgroundToCanvasSize(
+        img,
+        state.aspectRatio,
+        state.fitMode
+      );
+      bgObjectUrl = optimized ?? sourceUrl;
+      state.hasBackgroundImage = true;
+      await applyBackgroundDisplayUrl(bgObjectUrl);
+    }
   } catch (err) {
     clearBackground();
     alert(`Could not load background: ${err.message}`);
@@ -1175,6 +1353,18 @@ function initControls() {
     refreshBackgroundRaster();
   });
 
+  $("bg-video-mode").addEventListener("change", (e) => {
+    if (!undoManager.isRestoring()) pushUndo();
+    state.bgVideoMode = e.target.value === "boomerang" ? "boomerang" : "loop";
+    if (state.bgVideoMode !== "boomerang") {
+      resetBgVideoSeekState();
+    }
+    syncBgBoomerangWarning();
+    syncBackgroundVideo(engine.timelineTime, {
+      isPlaying: engine.running && !engine.paused,
+    });
+  });
+
   $("color-overlay-enabled").addEventListener("change", (e) => {
     if (!undoManager.isRestoring()) pushUndo();
     state.colorOverlayEnabled = e.target.checked;
@@ -1370,6 +1560,10 @@ function initTransport() {
 
   $("btn-reset").addEventListener("click", () => {
     engine.reset();
+    if (bgVideo.src) {
+      bgVideo.pause();
+      bgVideo.currentTime = 0;
+    }
     if (bgMusic.src) {
       bgMusic.pause();
       bgMusic.currentTime = 0;
@@ -1421,6 +1615,9 @@ async function runExport() {
     progressLabel.textContent = "Preparing export…";
 
     const blob = await exportRecording(canvas, engine, {
+      bgVideoEl: state.hasBackgroundImage && state.bgMediaType === "video" ? bgVideo : null,
+      bgVideoMode: state.bgVideoMode,
+      bgVideoDuration: state.bgVideoDuration || bgVideo.duration || 0,
       musicEl: bgMusic.src ? bgMusic : null,
       voiceEl: bgVoice.src ? bgVoice : null,
       musicVolume: state.musicVolume,
@@ -1512,7 +1709,11 @@ function collectProjectMediaRefs() {
 
   return {
     background: state.hasBackgroundImage && bgName
-      ? { type: "image", fileName: bgName }
+      ? {
+          type: state.bgMediaType === "video" ? "video" : "image",
+          fileName: bgName,
+          playbackMode: state.bgMediaType === "video" ? state.bgVideoMode : undefined,
+        }
       : null,
     music:
       bgMusic.src && !musicName.startsWith("No music")
@@ -1528,11 +1729,18 @@ function collectProjectMediaRefs() {
 async function collectProjectMedia() {
   let background = null;
 
-  if (state.hasBackgroundImage && bgImage.src) {
+  const bgSrc =
+    state.bgMediaType === "video"
+      ? bgVideo.currentSrc || bgVideo.src
+      : bgImage.currentSrc || bgImage.src;
+  if (state.hasBackgroundImage && bgSrc) {
     background = await urlToDataPayload(
-      bgImage.currentSrc || bgImage.src,
+      bgSrc,
       cleanBgFileName($("bg-filename").textContent),
-      { type: "image" }
+      {
+        type: state.bgMediaType === "video" ? "video" : "image",
+        playbackMode: state.bgMediaType === "video" ? state.bgVideoMode : undefined,
+      }
     );
   }
 
@@ -1578,13 +1786,19 @@ async function blobFromObjectUrl(url) {
 
 async function getMediaBlobsForCloud() {
   const out = {};
-  if (state.hasBackgroundImage && bgImage.src) {
-    const fileName = cleanBgFileName($("bg-filename").textContent) || "background.jpg";
-    const blob = await blobFromObjectUrl(bgImage.currentSrc || bgImage.src);
+  const bgSrc =
+    state.bgMediaType === "video"
+      ? bgVideo.currentSrc || bgVideo.src
+      : bgImage.currentSrc || bgImage.src;
+  if (state.hasBackgroundImage && bgSrc) {
+    const defaultName = state.bgMediaType === "video" ? "background.mp4" : "background.jpg";
+    const fileName = cleanBgFileName($("bg-filename").textContent) || defaultName;
+    const blob = await blobFromObjectUrl(bgSrc);
     out.background = {
       blob,
       fileName,
-      mimeType: blob.type || "image/jpeg",
+      mimeType:
+        blob.type || (state.bgMediaType === "video" ? "video/mp4" : "image/jpeg"),
     };
   }
   const musicName = $("bg-music-filename").textContent;
@@ -2039,6 +2253,7 @@ function openExportChoiceDialog() {
     runExport();
     return;
   }
+  syncExportChoiceHints();
   dialog.showModal();
 }
 
@@ -2054,11 +2269,18 @@ async function handleExportChoice(ev) {
   await runExport();
 }
 
+function syncExportChoiceHints() {
+  const warning = $("export-choice-browser-video-warning");
+  if (!warning) return;
+  const hasVideoBackground = state.hasBackgroundImage && state.bgMediaType === "video";
+  warning.classList.toggle("hidden", !hasVideoBackground);
+}
+
 function initAuthUi() {
   // Authentication intentionally disabled: app is open for everyone.
 }
 
-const STATE_MEDIA_KEYS = new Set(["bgUrl", "hasBackgroundImage"]);
+const STATE_MEDIA_KEYS = new Set(["bgUrl", "hasBackgroundImage", "bgMediaType", "bgVideoDuration"]);
 
 function applySettingsFromDocument(settings) {
   if (!settings || typeof settings !== "object") return;
@@ -2138,6 +2360,9 @@ async function applyMediaFromDocument(media) {
   if (!media || typeof media !== "object") return;
 
   const bg = media.background;
+  if (bg?.playbackMode) {
+    state.bgVideoMode = bg.playbackMode === "boomerang" ? "boomerang" : "loop";
+  }
   if (bg?.dataUrl) {
     try {
       const file = await dataUrlToFile(bg);
@@ -2299,6 +2524,7 @@ async function exportSetupJson(options = {}) {
 
 function initExport() {
   $("btn-export").addEventListener("click", openExportChoiceDialog);
+  syncExportChoiceHints();
 
   const dialog = $("export-choice-dialog");
   dialog?.querySelector("form")?.addEventListener("submit", handleExportChoice);
@@ -2392,6 +2618,9 @@ function init() {
   initControlTabs();
   initCollapsibles();
   initPanelResize();
+  bgVideo?.addEventListener("seeked", handleBgVideoSeeked);
+  bgVideo?.addEventListener("emptied", resetBgVideoSeekState);
+  bgVideo?.addEventListener("error", resetBgVideoSeekState);
   applyMediaVolume(bgMusic, state.musicVolume);
   applyMediaVolume(bgVoice, state.voiceVolume);
   $("music-loop").checked = state.musicLoop;

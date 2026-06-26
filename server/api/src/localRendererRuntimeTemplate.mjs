@@ -522,6 +522,115 @@ function runFfmpeg(args) {
   });
 }
 
+function isVideoFilePath(filePath) {
+  if (!filePath) return false;
+  const ext = path.extname(String(filePath)).toLowerCase();
+  return ext === ".mp4" || ext === ".mov";
+}
+
+function modTime(value, duration) {
+  if (!Number.isFinite(duration) || duration <= 0) return 0;
+  return ((value % duration) + duration) % duration;
+}
+
+function mapPlaybackTime(t, duration, mode = "loop") {
+  if (!Number.isFinite(duration) || duration <= 0) return 0;
+  if (mode === "boomerang") {
+    const period = duration * 2;
+    const phase = modTime(t, period);
+    return phase <= duration ? phase : period - phase;
+  }
+  return modTime(t, duration);
+}
+
+function runFfprobe(args) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn("ffprobe", args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    proc.on("close", (code) => {
+      if (code === 0) resolve(stdout.trim());
+      else reject(new Error(stderr.slice(-1200) || `ffprobe exited with code ${code}`));
+    });
+  });
+}
+
+async function probeVideoDurationSec(filePath) {
+  const out = await runFfprobe([
+    "-v",
+    "error",
+    "-show_entries",
+    "format=duration",
+    "-of",
+    "default=noprint_wrappers=1:nokey=1",
+    filePath,
+  ]);
+  const duration = Number(out);
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new Error("Could not read background video duration.");
+  }
+  return duration;
+}
+
+async function prepareBackgroundVideo(inputPath, outputPath, ew, eh, fitMode = "cover") {
+  const fit = fitMode === "contain" ? "contain" : fitMode === "fill" ? "fill" : "cover";
+  const scaleFilter =
+    fit === "fill"
+      ? `scale=${ew}:${eh}`
+      : fit === "contain"
+        ? `scale=${ew}:${eh}:force_original_aspect_ratio=decrease,pad=${ew}:${eh}:(ow-iw)/2:(oh-ih)/2:color=black`
+        : `scale=${ew}:${eh}:force_original_aspect_ratio=increase,crop=${ew}:${eh}`;
+  await runFfmpeg([
+    "-y",
+    "-i",
+    inputPath,
+    "-an",
+    "-filter:v",
+    `${scaleFilter},format=yuv420p`,
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-crf",
+    "20",
+    "-movflags",
+    "+faststart",
+    outputPath,
+  ]);
+  return outputPath;
+}
+
+async function createBoomerangVideo(inputPath, outputPath) {
+  await runFfmpeg([
+    "-y",
+    "-i",
+    inputPath,
+    "-an",
+    "-filter_complex",
+    "[0:v]split[fwd][rev];[rev]reverse[r];[fwd][r]concat=n=2:v=1:a=0[v]",
+    "-map",
+    "[v]",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-crf",
+    "20",
+    "-movflags",
+    "+faststart",
+    outputPath,
+  ]);
+  return outputPath;
+}
+
 async function main() {
   const { bundle, output } = parseArgs(process.argv);
   const projectPath = path.join(bundle, "project", "project.json");
@@ -595,21 +704,57 @@ async function main() {
   await writeFile(textPngPath, textCanvas.toBuffer("image/png"));
 
   try {
+    let bgRenderPath = bgPath;
+    let bgIsVideo = false;
+    let bgVideoDuration = 0;
+    if (bgPath && isVideoFilePath(bgPath)) {
+      bgIsVideo = true;
+      const preparedBg = path.join(tmpDir, "background-video-prepared.mp4");
+      await prepareBackgroundVideo(
+        bgPath,
+        preparedBg,
+        ew,
+        eh,
+        settings.fitMode || "cover"
+      );
+      const playbackMode =
+        settings.backgroundVideoMode === "boomerang" ? "boomerang" : "loop";
+      if (playbackMode === "boomerang") {
+        const boomerangBg = path.join(tmpDir, "background-video-boomerang.mp4");
+        await createBoomerangVideo(preparedBg, boomerangBg);
+        bgRenderPath = boomerangBg;
+      } else {
+        bgRenderPath = preparedBg;
+      }
+      bgVideoDuration = await probeVideoDurationSec(bgRenderPath);
+    }
+
     const yExpr = scrollYExpr({ startDelay, startY, endY, speedY });
     const overlayYExpr = textOffsetY ? `(${yExpr})-${textOffsetY}` : yExpr;
     const args = ["-y"];
 
-    if (bgPath) {
-      args.push(
-        "-loop",
-        "1",
-        "-framerate",
-        String(FPS),
-        "-t",
-        String(totalDuration),
-        "-i",
-        bgPath
-      );
+    if (bgRenderPath) {
+      if (bgIsVideo) {
+        const startOffset = mapPlaybackTime(
+          Number(timeline.position || 0),
+          bgVideoDuration,
+          settings.backgroundVideoMode === "boomerang" ? "boomerang" : "loop"
+        );
+        args.push("-stream_loop", "-1");
+        if (startOffset > 0) args.push("-ss", String(startOffset));
+        args.push("-t", String(totalDuration), "-i", bgRenderPath);
+      } else {
+        args.push(
+          "-loop",
+          "1",
+          "-framerate",
+          String(FPS),
+          "-t",
+          String(totalDuration),
+          "-i",
+          bgRenderPath
+        );
+      }
     } else {
       args.push(
         "-f",
@@ -643,7 +788,7 @@ async function main() {
     }
 
     const filterParts = [];
-    const videoPart = bgPath
+    const videoPart = bgRenderPath
       ? `[0:v]scale=${ew}:${eh}:force_original_aspect_ratio=increase,crop=${ew}:${eh},format=yuv420p[bg];[bg][1:v]overlay=x=0:y='${overlayYExpr}':eval=frame:format=auto[vout]`
       : `[0:v]format=yuv420p[bg];[bg][1:v]overlay=x=0:y='${overlayYExpr}':eval=frame:format=auto[vout]`;
     filterParts.push(videoPart);

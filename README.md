@@ -1,11 +1,12 @@
 # MM-Scroller
 
-Browser-based tool to place animated scrolling text over a still image background, with music and voiceover. No server, no install. Export as MP4.
+Browser-based tool to place animated scrolling text over an image or video background, with music and voiceover. No server, no install. Export as MP4.
 
 ## Features
 
 - Multi-line text with blank-line spacers
-- **Still image** background (JPG, PNG, WebP)
+- **Background media**: images (JPG, PNG, WebP) and videos (MP4, MOV)
+- Video playback modes for shorter clips: loop or boomerang
 - **Music** upload (MP3, WAV) with volume control
 - **Voiceover** upload (MP3, WAV) with volume control
 - Font picker (32 curated Google Fonts), size, color, opacity, alignment

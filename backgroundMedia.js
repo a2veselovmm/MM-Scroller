@@ -7,5 +7,13 @@ export function mapBackgroundTime(t, duration, mode = "loop") {
     return Math.min(clamped, Math.max(0, duration - 0.001));
   }
 
+  if (mode === "boomerang") {
+    const period = duration * 2;
+    if (!Number.isFinite(period) || period <= 0) return 0;
+    const cycle = ((clamped % period) + period) % period;
+    const mirrored = cycle <= duration ? cycle : period - cycle;
+    return Math.min(mirrored, Math.max(0, duration - 0.001));
+  }
+
   return ((clamped % duration) + duration) % duration;
 }

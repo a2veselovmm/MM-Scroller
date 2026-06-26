@@ -9,6 +9,7 @@ import {
   readBgEffectsFromCanvas,
 } from "./backgroundEffects.js";
 import { drawImageFit } from "./backgroundImage.js";
+import { mapBackgroundTime } from "./backgroundMedia.js";
 import { evenDimension, getDesignCanvasSize, getExportCanvasSize, EXPORT_FPS } from "./canvasDesign.js";
 import { encodeFrameSequence } from "./frameEncoder.js";
 import { runAtDesignScale } from "./previewLayout.js";
@@ -259,6 +260,7 @@ function canvasToJpegBlob(canvas, quality = 0.78) {
 
 function drawBackgroundLayer(ctx, canvasEl, w, h) {
   const bgImg = canvasEl.querySelector("#bg-image:not(.hidden)");
+  const bgVideo = canvasEl.querySelector("#bg-video:not(.hidden)");
   const placeholder = canvasEl.querySelector("#bg-placeholder:not(.hidden)");
 
   ctx.fillStyle = "#111118";
@@ -273,8 +275,10 @@ function drawBackgroundLayer(ctx, canvasEl, w, h) {
     }
   };
 
-  const fit = bgImg?.dataset.fit || "cover";
-  if (bgImg && !bgImg.classList.contains("hidden")) {
+  const fit = bgVideo?.dataset.fit || bgImg?.dataset.fit || "cover";
+  if (bgVideo && !bgVideo.classList.contains("hidden")) {
+    drawMedia(bgVideo, fit);
+  } else if (bgImg && !bgImg.classList.contains("hidden")) {
     drawMedia(bgImg, fit);
   } else if (placeholder) {
     const grad = ctx.createLinearGradient(0, 0, w, h);
@@ -287,6 +291,12 @@ function drawBackgroundLayer(ctx, canvasEl, w, h) {
 
 }
 
+function drawBackgroundEffects(ctx, canvasEl, ew, eh) {
+  const bgEffects = readBgEffectsFromCanvas(canvasEl);
+  drawVignette(ctx, ew, eh, bgEffects);
+  drawColorOverlay(ctx, ew, eh, bgEffects);
+}
+
 /** Bake background + vignette + overlay at export resolution (ew×eh). */
 function buildBackgroundCache(canvasEl, ew, eh) {
   const cache = document.createElement("canvas");
@@ -294,11 +304,18 @@ function buildBackgroundCache(canvasEl, ew, eh) {
   cache.height = eh;
   const sctx = cache.getContext("2d");
   drawBackgroundLayer(sctx, canvasEl, ew, eh);
+  drawBackgroundEffects(sctx, canvasEl, ew, eh);
 
-  const bgEffects = readBgEffectsFromCanvas(canvasEl);
-  drawVignette(sctx, ew, eh, bgEffects);
-  drawColorOverlay(sctx, ew, eh, bgEffects);
+  return cache;
+}
 
+/** Bake vignette + color overlay only (for dynamic video backgrounds). */
+function buildBackgroundEffectsCache(canvasEl, ew, eh) {
+  const cache = document.createElement("canvas");
+  cache.width = ew;
+  cache.height = eh;
+  const sctx = cache.getContext("2d");
+  drawBackgroundEffects(sctx, canvasEl, ew, eh);
   return cache;
 }
 
@@ -330,10 +347,28 @@ function buildTextLayerCaches(textContent, w) {
 function compositeFrame(
   ctx,
   ty,
-  { bgCache, textCanvas, textOffsetY = 0, w, h, ew, eh, drawScale, designHeight }
+  {
+    bgCache,
+    bgEffectsCache,
+    hasDynamicBackground = false,
+    canvasEl,
+    textCanvas,
+    textOffsetY = 0,
+    w,
+    h,
+    ew,
+    eh,
+    drawScale,
+    designHeight,
+  }
 ) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.drawImage(bgCache, 0, 0);
+  if (hasDynamicBackground && canvasEl) {
+    drawBackgroundLayer(ctx, canvasEl, ew, eh);
+    if (bgEffectsCache) ctx.drawImage(bgEffectsCache, 0, 0);
+  } else if (bgCache) {
+    ctx.drawImage(bgCache, 0, 0);
+  }
   ctx.setTransform(drawScale, 0, 0, drawScale, 0, 0);
 
   ctx.save();
@@ -353,6 +388,27 @@ function compositeFrame(
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
+async function seekVideoForFrame(videoEl, targetSec) {
+  if (!videoEl || !Number.isFinite(targetSec)) return;
+  if (Math.abs((videoEl.currentTime || 0) - targetSec) < 0.04) return;
+  await new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(finish, 120);
+    videoEl.addEventListener("seeked", finish, { once: true });
+    try {
+      videoEl.currentTime = targetSec;
+    } catch {
+      finish();
+    }
+  });
+}
+
 /**
  * Frame-by-frame export (Remotion-style): timeline state drives each captured frame.
  * @param {HTMLElement} canvasEl
@@ -362,6 +418,9 @@ function compositeFrame(
  */
 export async function exportRecording(canvasEl, engine, hooks = {}) {
   const {
+    bgVideoEl = null,
+    bgVideoMode = "loop",
+    bgVideoDuration = 0,
     onProgress = () => {},
     onStatus = () => {},
     musicEl = null,
@@ -392,9 +451,14 @@ export async function exportRecording(canvasEl, engine, hooks = {}) {
   engine.measure();
 
   onStatus("Caching background…");
-  const bgCache = runAtDesignScale(stageEl, () =>
-    buildBackgroundCache(canvasEl, ew, eh)
-  );
+  const hasDynamicBackground =
+    !!bgVideoEl && !!bgVideoEl.src && !bgVideoEl.classList.contains("hidden");
+  const bgCache = hasDynamicBackground
+    ? null
+    : runAtDesignScale(stageEl, () => buildBackgroundCache(canvasEl, ew, eh));
+  const bgEffectsCache = hasDynamicBackground
+    ? runAtDesignScale(stageEl, () => buildBackgroundEffectsCache(canvasEl, ew, eh))
+    : null;
 
   onStatus("Caching text…");
   const textLayers = textContent
@@ -403,6 +467,9 @@ export async function exportRecording(canvasEl, engine, hooks = {}) {
 
   const layerBundle = {
     bgCache,
+    bgEffectsCache,
+    hasDynamicBackground,
+    canvasEl,
     ...textLayers,
     w,
     h,
@@ -420,6 +487,13 @@ export async function exportRecording(canvasEl, engine, hooks = {}) {
     renderFrame: async (_frameIndex, t) => {
       engine.applyTime(t);
       await onFrame(t);
+      if (hasDynamicBackground && bgVideoEl) {
+        const dur = Number(bgVideoDuration || bgVideoEl.duration || 0);
+        if (dur > 0) {
+          const mapped = mapBackgroundTime(t, dur, bgVideoMode);
+          await seekVideoForFrame(bgVideoEl, mapped);
+        }
+      }
       compositeFrame(ctx, engine.y, layerBundle);
       return canvasToJpegBlob(recordCanvas);
     },

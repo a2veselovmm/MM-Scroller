@@ -46,6 +46,119 @@ function runFfmpeg(args, { onSpawn, onProgress, totalDurationSec } = {}) {
   });
 }
 
+function modTime(value, duration) {
+  if (!Number.isFinite(duration) || duration <= 0) return 0;
+  return ((value % duration) + duration) % duration;
+}
+
+async function runFfprobe(args) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn("ffprobe", args, { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    let err = "";
+    proc.stdout.on("data", (d) => {
+      out += d.toString();
+    });
+    proc.stderr.on("data", (d) => {
+      err += d.toString();
+    });
+    proc.on("close", (code) => {
+      if (code === 0) resolve(out.trim());
+      else reject(new Error(err.slice(-800) || `ffprobe exited ${code}`));
+    });
+  });
+}
+
+export async function probeVideoDurationSec(filePath) {
+  const out = await runFfprobe([
+    "-v",
+    "error",
+    "-show_entries",
+    "format=duration",
+    "-of",
+    "default=noprint_wrappers=1:nokey=1",
+    filePath,
+  ]);
+  const duration = Number(out);
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new Error("Could not read background video duration.");
+  }
+  return duration;
+}
+
+export async function prepareBackgroundVideo({
+  inputPath,
+  outputPath,
+  width,
+  height,
+  fitMode = "cover",
+  onFfmpegSpawn,
+}) {
+  const w = Math.max(2, Math.round(Number(width) || 1080));
+  const h = Math.max(2, Math.round(Number(height) || 1920));
+  const fit = fitMode === "contain" ? "contain" : fitMode === "fill" ? "fill" : "cover";
+  const scaleFilter =
+    fit === "fill"
+      ? `scale=${w}:${h}`
+      : fit === "contain"
+        ? `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black`
+        : `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
+
+  await runFfmpeg(
+    [
+      "-y",
+      "-i",
+      inputPath,
+      "-an",
+      "-filter:v",
+      `${scaleFilter},format=yuv420p`,
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-crf",
+      "20",
+      "-movflags",
+      "+faststart",
+      outputPath,
+    ],
+    { onSpawn: onFfmpegSpawn }
+  );
+  return outputPath;
+}
+
+export async function createBoomerangVideo({
+  inputPath,
+  outputPath,
+  onFfmpegSpawn,
+}) {
+  await runFfmpeg(
+    [
+      "-y",
+      "-i",
+      inputPath,
+      "-an",
+      "-filter_complex",
+      "[0:v]split[fwd][rev];[rev]reverse[r];[fwd][r]concat=n=2:v=1:a=0[v]",
+      "-map",
+      "[v]",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-crf",
+      "20",
+      "-movflags",
+      "+faststart",
+      outputPath,
+    ],
+    { onSpawn: onFfmpegSpawn }
+  );
+  return outputPath;
+}
+
 function scrollYExpr({ startDelay, startY, endY, speedY, timeOffsetSec = 0 }) {
   const sd = Number(startDelay) || 0;
   const sy = Number(startY) || 0;
@@ -55,16 +168,14 @@ function scrollYExpr({ startDelay, startY, endY, speedY, timeOffsetSec = 0 }) {
   return `if(lt(t+${t0}\\,${sd})\\,${sy}\\,max(${ey}\\,${sy}-((t+${t0})-${sd})*${sp}))`;
 }
 
-function videoEncodeArgs(preset, crf) {
-  return [
+function videoEncodeArgs(preset, crf, { stillImage = true } = {}) {
+  const args = [
     "-c:v",
     "libx264",
     "-pix_fmt",
     "yuv420p",
     "-preset",
     preset,
-    "-tune",
-    "stillimage",
     "-crf",
     crf,
     "-threads",
@@ -74,6 +185,10 @@ function videoEncodeArgs(preset, crf) {
     "-movflags",
     "+faststart",
   ];
+  if (stillImage) {
+    args.splice(6, 0, "-tune", "stillimage");
+  }
+  return args;
 }
 
 function buildScrollFilter(yExpr, textOffsetY = 0) {
@@ -114,11 +229,32 @@ function appendTextStripInputs(args, {
   }
 }
 
+function appendBackgroundInput(args, {
+  bgImagePath,
+  fps,
+  dur,
+  backgroundIsVideo = false,
+  backgroundDurationSec = 0,
+  timeOffsetSec = 0,
+}) {
+  if (!backgroundIsVideo) {
+    args.push("-loop", "1", "-framerate", String(fps), "-t", String(dur), "-i", bgImagePath);
+    return;
+  }
+
+  args.push("-stream_loop", "-1");
+  const offset = modTime(Number(timeOffsetSec) || 0, Number(backgroundDurationSec) || 0);
+  if (offset > 0) args.push("-ss", String(offset));
+  args.push("-t", String(dur), "-i", bgImagePath);
+}
+
 /**
  * Encode one video-only scroll segment (no audio).
  */
 export async function encodeScrollSegment({
   bgImagePath,
+  backgroundIsVideo = false,
+  backgroundDurationSec = 0,
   textStripPath,
   textStripWidth,
   textStripHeight,
@@ -142,7 +278,14 @@ export async function encodeScrollSegment({
   const filter = buildScrollFilter(yExpr, textOffsetY);
 
   const args = ["-y"];
-  args.push("-loop", "1", "-framerate", String(fps), "-t", String(dur), "-i", bgImagePath);
+  appendBackgroundInput(args, {
+    bgImagePath,
+    fps,
+    dur,
+    backgroundIsVideo,
+    backgroundDurationSec,
+    timeOffsetSec,
+  });
   appendTextStripInputs(args, {
     textStripPath,
     textStripWidth,
@@ -152,7 +295,16 @@ export async function encodeScrollSegment({
     dur,
   });
 
-  args.push("-filter_complex", filter, "-map", "[vout]", ...videoEncodeArgs(preset, crf), "-t", String(dur), outputPath);
+  args.push(
+    "-filter_complex",
+    filter,
+    "-map",
+    "[vout]",
+    ...videoEncodeArgs(preset, crf, { stillImage: !backgroundIsVideo }),
+    "-t",
+    String(dur),
+    outputPath
+  );
 
   await runFfmpeg(args, {
     onSpawn: onFfmpegSpawn,
@@ -246,6 +398,8 @@ export async function concatSegmentsAndMuxAudio({
  */
 export async function encodeScrollVideo({
   bgImagePath,
+  backgroundIsVideo = false,
+  backgroundDurationSec = 0,
   textStripPath,
   textStripWidth,
   textStripHeight,
@@ -274,7 +428,14 @@ export async function encodeScrollVideo({
 
   const args = ["-y"];
 
-  args.push("-loop", "1", "-framerate", String(fps), "-t", String(dur), "-i", bgImagePath);
+  appendBackgroundInput(args, {
+    bgImagePath,
+    fps,
+    dur,
+    backgroundIsVideo,
+    backgroundDurationSec,
+    timeOffsetSec: 0,
+  });
 
   appendTextStripInputs(args, {
     textStripPath,
@@ -322,7 +483,7 @@ export async function encodeScrollVideo({
 
   args.push("-filter_complex", filterComplex, "-map", "[vout]");
   if (mapAudio) args.push("-map", mapAudio);
-  args.push(...videoEncodeArgs(preset, crf), "-t", String(dur));
+  args.push(...videoEncodeArgs(preset, crf, { stillImage: !backgroundIsVideo }), "-t", String(dur));
   if (mapAudio) {
     args.push("-c:a", "aac", "-b:a", "192k", "-shortest");
   }

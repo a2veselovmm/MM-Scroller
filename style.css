@@ -1023,6 +1023,12 @@ input[type="color"] {
   line-height: 1.35;
 }
 
+.export-choice-warning {
+  margin-top: 6px;
+  color: #f59e0b !important;
+  font-weight: 600;
+}
+
 .export-choice-actions {
   display: flex;
   justify-content: flex-end;

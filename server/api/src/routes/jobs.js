@@ -41,6 +41,26 @@ function isLocalScriptTarget(job) {
   return (job?.target || RENDER_TARGET.CLOUD) === RENDER_TARGET.LOCAL_SCRIPT;
 }
 
+function isVideoBackgroundMeta(meta) {
+  if (!meta) return false;
+  const mime = String(meta.mimeType || "").toLowerCase();
+  if (mime.startsWith("video/")) return true;
+  const fileName = String(meta.fileName || "").toLowerCase();
+  return fileName.endsWith(".mp4") || fileName.endsWith(".mov");
+}
+
+function planSingleRender(durationSec) {
+  const duration = Math.max(0.1, Number(durationSec) || 0.1);
+  return { mode: "single", segmentCount: 1, segmentDurationSec: duration };
+}
+
+function maxBytesForField(field, meta) {
+  if (field === "background" && isVideoBackgroundMeta(meta)) {
+    return LIMITS.maxBackgroundVideoBytes;
+  }
+  return LIMITS.maxFileBytes;
+}
+
 function creatorUsername(job) {
   const email = String(job?.identity?.email || "").trim();
   if (email.includes("@")) return email.split("@")[0];
@@ -207,7 +227,9 @@ export function createJobsRouter(config) {
       }
 
       const maxBytes =
-        field === "project" ? LIMITS.maxProjectJsonBytes : LIMITS.maxFileBytes;
+        field === "project"
+          ? LIMITS.maxProjectJsonBytes
+          : maxBytesForField(field, job.fileMeta?.[field]);
       if (body.length > maxBytes) {
         return res.status(400).json({ error: `${field} exceeds file size limit.` });
       }
@@ -220,7 +242,7 @@ export function createJobsRouter(config) {
         updatedAt: new Date().toISOString(),
       };
 
-      if (field === "background") {
+      if (field === "background" && !isVideoBackgroundMeta(job.fileMeta?.background)) {
         try {
           let aspectRatio = job.project?.settings?.aspectRatio;
           if (!aspectRatio && job.uploadPaths?.project) {
@@ -239,7 +261,11 @@ export function createJobsRouter(config) {
         }
       }
 
-      if (field === "project" && job.uploadPaths?.background) {
+      if (
+        field === "project" &&
+        job.uploadPaths?.background &&
+        !isVideoBackgroundMeta(job.fileMeta?.background)
+      ) {
         try {
           const projectDoc = JSON.parse(body.toString());
           const aspectRatio = projectDoc?.settings?.aspectRatio || "9/16";
@@ -282,7 +308,7 @@ export function createJobsRouter(config) {
         const meta = files[field];
         if (!meta) continue;
         const size = Number(meta.sizeBytes || 0);
-        if (size > LIMITS.maxFileBytes) {
+        if (size > maxBytesForField(field, meta)) {
           return res.status(400).json({ error: `${field} exceeds file size limit.` });
         }
         totalUploadBytes += size;
@@ -294,7 +320,10 @@ export function createJobsRouter(config) {
       }
 
       const validation = validateProjectForQueue(project, { totalUploadBytes });
-      const renderPlan = planRender(validation.durationSec);
+      const backgroundMeta = fileMeta.background || null;
+      const renderPlan = isVideoBackgroundMeta(backgroundMeta)
+        ? planSingleRender(validation.durationSec)
+        : planRender(validation.durationSec);
       const jobId = uuidv4();
       const identity = req.identity || { uid: null, email: null, isAnonymous: true };
       const now = new Date().toISOString();
