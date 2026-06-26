@@ -1,8 +1,0 @@
-{
-  "apiKey": "YOUR_FIREBASE_WEB_API_KEY",
-  "authDomain": "mm-anton-sandbox.firebaseapp.com",
-  "projectId": "mm-anton-sandbox",
-  "storageBucket": "mm-anton-sandbox.firebasestorage.app",
-  "messagingSenderId": "YOUR_SENDER_ID",
-  "appId": "YOUR_APP_ID"
-}

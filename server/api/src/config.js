@@ -3,10 +3,6 @@ export function loadConfig() {
   if (!projectId) {
     throw new Error("GCP_PROJECT_ID is required.");
   }
-  const autoApproveDomains = (process.env.AUTO_APPROVE_DOMAINS || "")
-    .split(",")
-    .map((s) => String(s || "").trim().replace(/^@+/, "").toLowerCase())
-    .filter(Boolean);
   return {
     projectId,
     region: process.env.GCP_REGION || "us-central1",
@@ -19,11 +15,7 @@ export function loadConfig() {
       .map((s) => s.trim())
       .filter(Boolean),
     betaKeySecret: process.env.BETA_KEY_SECRET || "mm-scroller-beta-key",
-    requireAuth: process.env.REQUIRE_AUTH === "true",
-    requireApproval: process.env.REQUIRE_APPROVAL === "true",
     requireBetaKey: process.env.REQUIRE_BETA_KEY === "true",
-    authAllowedDomain: process.env.AUTH_ALLOWED_DOMAIN || "",
-    autoApproveDomains,
     port: Number(process.env.PORT || 8080),
     jobsPerHour: Number(process.env.JOBS_PER_HOUR || 20),
     jobsPerDay: Number(process.env.JOBS_PER_DAY || 100),

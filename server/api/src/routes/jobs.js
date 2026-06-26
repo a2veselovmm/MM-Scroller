@@ -61,14 +61,6 @@ function maxBytesForField(field, meta) {
   return LIMITS.maxFileBytes;
 }
 
-function creatorUsername(job) {
-  const email = String(job?.identity?.email || "").trim();
-  if (email.includes("@")) return email.split("@")[0];
-  const uid = String(job?.identity?.uid || "").trim();
-  if (uid) return `user-${uid.slice(0, 8)}`;
-  return "anonymous";
-}
-
 function assertJobAccess(req, job) {
   if (isLocalScriptTarget(job)) return;
   if (job.identity?.uid) {
@@ -97,7 +89,6 @@ function jobSummary(job, extras = {}) {
   return {
     jobId: job.jobId,
     renderName: job.renderName || null,
-    creatorUsername: creatorUsername(job),
     target: job.target || RENDER_TARGET.CLOUD,
     status: job.status,
     progress: job.progress ?? 0,
@@ -650,11 +641,29 @@ export function createJobsRouter(config) {
         for (const field of MEDIA_FIELDS) {
           const mediaPath = job.uploadPaths[field];
           if (!mediaPath || !(await objectExists(config, mediaPath))) continue;
+          const existing =
+            doc.media[field] && typeof doc.media[field] === "object" ? doc.media[field] : {};
           const meta = job.fileMeta?.[field] || {};
-          const data = await readObject(config, mediaPath);
           const mimeType = meta.mimeType || "application/octet-stream";
+          const sizeBytes = Number(meta.sizeBytes || 0);
+
+          // Large media makes setup JSON huge and can fail on Hosting/Cloud Run response path.
+          // Return a short-lived signed URL instead of inlining base64.
+          if (sizeBytes > LIMITS.maxProjectJsonBytes) {
+            doc.media[field] = {
+              ...existing,
+              fileName: meta.fileName || existing.fileName || field,
+              mimeType,
+              sizeBytes,
+              downloadUrl: await signedDownloadUrl(config, mediaPath),
+            };
+            continue;
+          }
+
+          const data = await readObject(config, mediaPath);
           doc.media[field] = {
-            fileName: meta.fileName || field,
+            ...existing,
+            fileName: meta.fileName || existing.fileName || field,
             mimeType,
             sizeBytes: data.length,
             dataUrl: `data:${mimeType};base64,${data.toString("base64")}`,

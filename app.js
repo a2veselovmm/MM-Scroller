@@ -1,4 +1,3 @@
-import { getIdToken } from "./auth.js";
 import {
   startCloudRender,
   startLocalScriptRender,
@@ -1867,7 +1866,6 @@ async function runCloudExport(renderName = "") {
       renderName: renderName.trim() || defaultRenderName(),
       buildDocument: () => buildSetupDocument(false),
       getMediaBlobs: getMediaBlobsForCloud,
-      getIdToken,
       onProgress: (pct) => {
         progressFill.style.width = `${pct}%`;
       },
@@ -1916,7 +1914,6 @@ async function runLocalScriptExport(renderName = "") {
       renderName: renderName.trim() || defaultRenderName(),
       buildDocument: () => buildSetupDocument(false),
       getMediaBlobs: getMediaBlobsForCloud,
-      getIdToken,
       onProgress: (pct) => {
         progressFill.style.width = `${pct}%`;
       },
@@ -2042,7 +2039,6 @@ function renderQueueCard(job) {
   const meta = document.createElement("p");
   meta.className = "render-queue-card-meta";
   const parts = [];
-  if (job.creatorUsername) parts.push(`by ${job.creatorUsername}`);
   parts.push(job.target === "local_script" ? "local script" : "cloud");
   if (job.segmentProgress?.total) {
     parts.push(`part ${job.segmentProgress.completed}/${job.segmentProgress.total}`);
@@ -2079,7 +2075,7 @@ function renderQueueCard(job) {
       if (!confirm(msg)) return;
       cancelBtn.disabled = true;
       try {
-        await cancelJob(job.jobId, { getIdToken });
+        await cancelJob(job.jobId);
       } catch (err) {
         alert(err.message);
         cancelBtn.disabled = false;
@@ -2111,7 +2107,7 @@ function renderQueueCard(job) {
     retryBtn.addEventListener("click", async () => {
       retryBtn.disabled = true;
       try {
-        await retryJob(job.jobId, { getIdToken });
+        await retryJob(job.jobId);
       } catch (err) {
         alert(err.message);
         retryBtn.disabled = false;
@@ -2145,7 +2141,7 @@ function appendDeleteButton(actions, job) {
     if (!confirm(msg)) return;
     deleteBtn.disabled = true;
     try {
-      await deleteJob(job.jobId, { getIdToken });
+      await deleteJob(job.jobId);
     } catch (err) {
       alert(err.message);
       deleteBtn.disabled = false;
@@ -2179,7 +2175,7 @@ async function reEditJobFromQueue(jobId, triggerBtn) {
   isImporting = true;
 
   try {
-    const { setup } = await fetchJobSetup(jobId, { getIdToken });
+    const { setup } = await fetchJobSetup(jobId);
     const doc = parseProjectDocument(setup);
     await applyProjectDocument(doc);
     undoManager.reset();
@@ -2218,7 +2214,7 @@ function renderQueueLists(groups) {
 }
 
 function initRenderQueue() {
-  const pollOpts = { getIdToken };
+  const pollOpts = {};
   startPolling(pollOpts);
   const notifiedCompletions = new Set();
 
@@ -2288,10 +2284,6 @@ function syncExportChoiceHints() {
   if (!warning) return;
   const hasVideoBackground = state.hasBackgroundImage && state.bgMediaType === "video";
   warning.classList.toggle("hidden", !hasVideoBackground);
-}
-
-function initAuthUi() {
-  // Authentication intentionally disabled: app is open for everyone.
 }
 
 const STATE_MEDIA_KEYS = new Set(["bgUrl", "hasBackgroundImage", "bgMediaType", "bgVideoDuration"]);
@@ -2377,13 +2369,32 @@ async function applyMediaFromDocument(media) {
 
   if (!media || typeof media !== "object") return;
 
+  async function mediaPayloadToFile(payload, fallbackName) {
+    if (!payload) return null;
+    if (payload.dataUrl) {
+      return dataUrlToFile(payload);
+    }
+    const remoteUrl = payload.downloadUrl || payload.url;
+    if (!remoteUrl) return null;
+    const res = await fetch(remoteUrl);
+    if (!res.ok) {
+      throw new Error(`Media download failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    return new File(
+      [blob],
+      payload.fileName || fallbackName,
+      { type: payload.mimeType || blob.type || "application/octet-stream" }
+    );
+  }
+
   const bg = media.background;
   if (bg?.playbackMode) {
     state.bgVideoMode = bg.playbackMode === "boomerang" ? "boomerang" : "loop";
   }
-  if (bg?.dataUrl) {
+  if (bg?.dataUrl || bg?.downloadUrl || bg?.url) {
     try {
-      const file = await dataUrlToFile(bg);
+      const file = await mediaPayloadToFile(bg, "background");
       await loadBackground(file);
     } catch (err) {
       console.warn(err);
@@ -2394,9 +2405,9 @@ async function applyMediaFromDocument(media) {
   }
 
   const music = media.music;
-  if (music?.dataUrl) {
+  if (music?.dataUrl || music?.downloadUrl || music?.url) {
     try {
-      const file = await dataUrlToFile(music);
+      const file = await mediaPayloadToFile(music, "music");
       loadMusic(file);
     } catch (err) {
       console.warn(err);
@@ -2407,9 +2418,9 @@ async function applyMediaFromDocument(media) {
   }
 
   const voice = media.voiceover;
-  if (voice?.dataUrl) {
+  if (voice?.dataUrl || voice?.downloadUrl || voice?.url) {
     try {
-      const file = await dataUrlToFile(voice);
+      const file = await mediaPayloadToFile(voice, "voiceover");
       loadVoiceover(file);
     } catch (err) {
       console.warn(err);
@@ -2647,7 +2658,6 @@ function init() {
   initTransport();
   initExport();
   initRenderQueue();
-  initAuthUi();
   setAspectRatio(state.aspectRatio);
   syncEngineDesignSpace();
   syncPreviewLayout();

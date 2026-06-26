@@ -1,15 +1,10 @@
 import express from "express";
-import { initializeApp, getApps } from "firebase-admin/app";
 import { loadConfig } from "./config.js";
 import { corsMiddleware } from "./middleware/cors.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { betaKeyMiddleware } from "./middleware/betaKey.js";
 import { createJobsRouter } from "./routes/jobs.js";
 import { LIMITS } from "../shared/constants.js";
-
-if (!getApps().length) {
-  initializeApp({ projectId: process.env.GCP_PROJECT_ID });
-}
 
 const config = loadConfig();
 const app = express();

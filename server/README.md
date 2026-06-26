@@ -59,35 +59,10 @@ gcloud secrets versions access latest --secret=mm-scroller-beta-key
 
 Set on API service: `REQUIRE_BETA_KEY=true` and pass header `X-MM-Beta-Key` from the client.
 
-## Gmail SSO (Phase 3)
+## Authentication
 
-1. Firebase Console → Authentication → Enable Google provider
-2. Copy web app config to `firebase-config.json` (see `firebase-config.example.json`)
-3. Deploy hosting (config is gitignored)
-4. Enable auth requirement on API: `REQUIRE_AUTH=true`, optional `AUTH_ALLOWED_DOMAIN=thebbco.com`
-
-### Manual user approval (Google SSO)
-
-Deploy script defaults:
-
-- `REQUIRE_AUTH=false`
-- `REQUIRE_APPROVAL=false`
-- `AUTO_APPROVE_DOMAINS=` (empty)
-
-This means the app is open to everyone by default.
-
-Approval records are stored in Firestore collection `approvedUsers`:
-
-- First signed-in request from a new user creates/updates a doc with `status: "pending"`.
-- To approve a user, set either:
-  - `approved: true`, or
-  - `status: "approved"`
-- Recommended doc id is the Firebase `uid`.
-
-If user is not approved, API returns `403 Account pending approval.`.
-
-Users with emails in `AUTO_APPROVE_DOMAINS` are auto-approved on first request.
-Use comma-separated domains (for example: `maneuvermarketing.com,example.com`).
+Authentication and approval gates were removed from this backend.
+The app and API are now open access by design.
 
 ## Local API dev
 

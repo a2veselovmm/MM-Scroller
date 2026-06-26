@@ -21,8 +21,7 @@
       "server/scripts/**",
       "server/README.md",
       "server/firestore.rules",
-      "cloudbuild.yaml",
-      "firebase-config.json"
+      "cloudbuild.yaml"
     ],
     "headers": [
       {
