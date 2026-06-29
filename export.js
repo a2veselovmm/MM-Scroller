@@ -297,6 +297,23 @@ function drawBackgroundEffects(ctx, canvasEl, ew, eh) {
   drawColorOverlay(ctx, ew, eh, bgEffects);
 }
 
+function drawOverlayLayer(ctx, canvasEl, w, h) {
+  const overlayImg = canvasEl.querySelector("#overlay-image:not(.hidden)");
+  const overlayVideo = canvasEl.querySelector("#overlay-video:not(.hidden)");
+  const fit = overlayVideo?.dataset.fit || overlayImg?.dataset.fit || "cover";
+  const source = overlayVideo && !overlayVideo.classList.contains("hidden")
+    ? overlayVideo
+    : overlayImg && !overlayImg.classList.contains("hidden")
+      ? overlayImg
+      : null;
+  if (!source) return;
+  try {
+    drawImageFit(ctx, source, w, h, fit);
+  } catch {
+    /* cross-origin taint */
+  }
+}
+
 /** Bake background + vignette + overlay at export resolution (ew×eh). */
 function buildBackgroundCache(canvasEl, ew, eh) {
   const cache = document.createElement("canvas");
@@ -316,6 +333,15 @@ function buildBackgroundEffectsCache(canvasEl, ew, eh) {
   cache.height = eh;
   const sctx = cache.getContext("2d");
   drawBackgroundEffects(sctx, canvasEl, ew, eh);
+  return cache;
+}
+
+function buildOverlayCache(canvasEl, ew, eh) {
+  const cache = document.createElement("canvas");
+  cache.width = ew;
+  cache.height = eh;
+  const sctx = cache.getContext("2d");
+  drawOverlayLayer(sctx, canvasEl, ew, eh);
   return cache;
 }
 
@@ -350,7 +376,9 @@ function compositeFrame(
   {
     bgCache,
     bgEffectsCache,
+    overlayCache,
     hasDynamicBackground = false,
+    hasDynamicOverlay = false,
     canvasEl,
     textCanvas,
     textOffsetY = 0,
@@ -386,6 +414,11 @@ function compositeFrame(
   ctx.restore();
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (hasDynamicOverlay && canvasEl) {
+    drawOverlayLayer(ctx, canvasEl, ew, eh);
+  } else if (overlayCache) {
+    ctx.drawImage(overlayCache, 0, 0);
+  }
 }
 
 async function seekVideoForFrame(videoEl, targetSec) {
@@ -421,6 +454,8 @@ export async function exportRecording(canvasEl, engine, hooks = {}) {
     bgVideoEl = null,
     bgVideoMode = "loop",
     bgVideoDuration = 0,
+    overlayVideoEl = null,
+    overlayVideoDuration = 0,
     onProgress = () => {},
     onStatus = () => {},
     musicEl = null,
@@ -459,6 +494,11 @@ export async function exportRecording(canvasEl, engine, hooks = {}) {
   const bgEffectsCache = hasDynamicBackground
     ? runAtDesignScale(stageEl, () => buildBackgroundEffectsCache(canvasEl, ew, eh))
     : null;
+  const hasDynamicOverlay =
+    !!overlayVideoEl && !!overlayVideoEl.src && !overlayVideoEl.classList.contains("hidden");
+  const overlayCache = hasDynamicOverlay
+    ? null
+    : runAtDesignScale(stageEl, () => buildOverlayCache(canvasEl, ew, eh));
 
   onStatus("Caching text…");
   const textLayers = textContent
@@ -468,7 +508,9 @@ export async function exportRecording(canvasEl, engine, hooks = {}) {
   const layerBundle = {
     bgCache,
     bgEffectsCache,
+    overlayCache,
     hasDynamicBackground,
+    hasDynamicOverlay,
     canvasEl,
     ...textLayers,
     w,
@@ -492,6 +534,13 @@ export async function exportRecording(canvasEl, engine, hooks = {}) {
         if (dur > 0) {
           const mapped = mapBackgroundTime(t, dur, bgVideoMode);
           await seekVideoForFrame(bgVideoEl, mapped);
+        }
+      }
+      if (hasDynamicOverlay && overlayVideoEl) {
+        const dur = Number(overlayVideoDuration || overlayVideoEl.duration || 0);
+        if (dur > 0) {
+          const mapped = mapBackgroundTime(t, dur, "loop");
+          await seekVideoForFrame(overlayVideoEl, mapped);
         }
       }
       compositeFrame(ctx, engine.y, layerBundle);

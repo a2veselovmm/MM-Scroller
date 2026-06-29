@@ -41,7 +41,7 @@ function isLocalScriptTarget(job) {
   return (job?.target || RENDER_TARGET.CLOUD) === RENDER_TARGET.LOCAL_SCRIPT;
 }
 
-function isVideoBackgroundMeta(meta) {
+function isVideoMediaMeta(meta) {
   if (!meta) return false;
   const mime = String(meta.mimeType || "").toLowerCase();
   if (mime.startsWith("video/")) return true;
@@ -55,7 +55,7 @@ function planSingleRender(durationSec) {
 }
 
 function maxBytesForField(field, meta) {
-  if (field === "background" && isVideoBackgroundMeta(meta)) {
+  if ((field === "background" || field === "overlay") && isVideoMediaMeta(meta)) {
     return LIMITS.maxBackgroundVideoBytes;
   }
   return LIMITS.maxFileBytes;
@@ -233,7 +233,7 @@ export function createJobsRouter(config) {
         updatedAt: new Date().toISOString(),
       };
 
-      if (field === "background" && !isVideoBackgroundMeta(job.fileMeta?.background)) {
+      if (field === "background" && !isVideoMediaMeta(job.fileMeta?.background)) {
         try {
           let aspectRatio = job.project?.settings?.aspectRatio;
           if (!aspectRatio && job.uploadPaths?.project) {
@@ -255,7 +255,7 @@ export function createJobsRouter(config) {
       if (
         field === "project" &&
         job.uploadPaths?.background &&
-        !isVideoBackgroundMeta(job.fileMeta?.background)
+        !isVideoMediaMeta(job.fileMeta?.background)
       ) {
         try {
           const projectDoc = JSON.parse(body.toString());
@@ -312,9 +312,11 @@ export function createJobsRouter(config) {
 
       const validation = validateProjectForQueue(project, { totalUploadBytes });
       const backgroundMeta = fileMeta.background || null;
-      const renderPlan = isVideoBackgroundMeta(backgroundMeta)
-        ? planSingleRender(validation.durationSec)
-        : planRender(validation.durationSec);
+      const overlayMeta = fileMeta.overlay || null;
+      const renderPlan =
+        isVideoMediaMeta(backgroundMeta) || !!overlayMeta
+          ? planSingleRender(validation.durationSec)
+          : planRender(validation.durationSec);
       const jobId = uuidv4();
       const identity = req.identity || { uid: null, email: null, isAnonymous: true };
       const now = new Date().toISOString();

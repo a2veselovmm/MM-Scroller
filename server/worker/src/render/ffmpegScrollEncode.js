@@ -189,12 +189,38 @@ function videoEncodeArgs(preset, crf, { stillImage = true } = {}) {
   return args;
 }
 
-function buildScrollFilter(yExpr, textOffsetY = 0) {
+function buildFitFilter(width, height, fitMode = "cover", { transparentPad = false } = {}) {
+  const w = Math.max(2, Math.round(Number(width) || 1080));
+  const h = Math.max(2, Math.round(Number(height) || 1920));
+  const fit = fitMode === "contain" ? "contain" : fitMode === "fill" ? "fill" : "cover";
+  if (fit === "fill") return `scale=${w}:${h}`;
+  if (fit === "contain") {
+    const padColor = transparentPad ? "black@0.0" : "black";
+    return `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=${padColor}`;
+  }
+  return `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
+}
+
+function buildScrollFilter(yExpr, textOffsetY = 0, {
+  overlayInputIndex = null,
+  overlayWidth = 0,
+  overlayHeight = 0,
+  overlayFitMode = "cover",
+} = {}) {
   const y = Number(textOffsetY) ? `(${yExpr})-${Number(textOffsetY)}` : yExpr;
-  return [
+  const parts = [
     `[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[bg]`,
-    `[bg][1:v]overlay=x=0:y='${y}':eval=frame:format=auto[vout]`,
-  ].join(";");
+    `[bg][1:v]overlay=x=0:y='${y}':eval=frame:format=auto[vtxt]`,
+  ];
+  if (overlayInputIndex == null) {
+    parts.push("[vtxt]null[vout]");
+    return parts.join(";");
+  }
+  parts.push(
+    `[${overlayInputIndex}:v]${buildFitFilter(overlayWidth, overlayHeight, overlayFitMode, { transparentPad: true })},format=rgba[ovr]`,
+    "[vtxt][ovr]overlay=x=0:y=0:eval=frame:format=auto[vout]"
+  );
+  return parts.join(";");
 }
 
 function appendTextStripInputs(args, {
@@ -246,6 +272,25 @@ function appendBackgroundInput(args, {
   args.push("-t", String(dur), "-i", bgImagePath);
 }
 
+function appendOverlayInput(args, {
+  overlayPath,
+  fps,
+  dur,
+  overlayIsVideo = false,
+  overlayDurationSec = 0,
+  timeOffsetSec = 0,
+}) {
+  if (!overlayPath) return;
+  if (!overlayIsVideo) {
+    args.push("-loop", "1", "-framerate", String(fps), "-t", String(dur), "-i", overlayPath);
+    return;
+  }
+  args.push("-stream_loop", "-1");
+  const offset = modTime(Number(timeOffsetSec) || 0, Number(overlayDurationSec) || 0);
+  if (offset > 0) args.push("-ss", String(offset));
+  args.push("-t", String(dur), "-i", overlayPath);
+}
+
 /**
  * Encode one video-only scroll segment (no audio).
  */
@@ -253,6 +298,12 @@ export async function encodeScrollSegment({
   bgImagePath,
   backgroundIsVideo = false,
   backgroundDurationSec = 0,
+  overlayPath = null,
+  overlayIsVideo = false,
+  overlayDurationSec = 0,
+  frameWidth = 0,
+  frameHeight = 0,
+  fitMode = "cover",
   textStripPath,
   textStripWidth,
   textStripHeight,
@@ -273,7 +324,13 @@ export async function encodeScrollSegment({
   const crf = process.env.CLOUD_ENCODE_CRF || "28";
   const dur = Math.max(0.1, Number(segmentDuration) || 1);
   const yExpr = scrollYExpr({ startDelay, startY, endY, speedY, timeOffsetSec });
-  const filter = buildScrollFilter(yExpr, textOffsetY);
+  const hasOverlay = !!overlayPath;
+  const filter = buildScrollFilter(yExpr, textOffsetY, {
+    overlayInputIndex: hasOverlay ? 2 : null,
+    overlayWidth: frameWidth || textStripWidth,
+    overlayHeight: frameHeight || 1920,
+    overlayFitMode: fitMode,
+  });
 
   const args = ["-y"];
   appendBackgroundInput(args, {
@@ -292,13 +349,21 @@ export async function encodeScrollSegment({
     fps,
     dur,
   });
+  appendOverlayInput(args, {
+    overlayPath,
+    fps,
+    dur,
+    overlayIsVideo,
+    overlayDurationSec,
+    timeOffsetSec,
+  });
 
   args.push(
     "-filter_complex",
     filter,
     "-map",
     "[vout]",
-    ...videoEncodeArgs(preset, crf, { stillImage: !backgroundIsVideo }),
+    ...videoEncodeArgs(preset, crf, { stillImage: !backgroundIsVideo && !overlayIsVideo }),
     "-t",
     String(dur),
     outputPath
@@ -398,6 +463,12 @@ export async function encodeScrollVideo({
   bgImagePath,
   backgroundIsVideo = false,
   backgroundDurationSec = 0,
+  overlayPath = null,
+  overlayIsVideo = false,
+  overlayDurationSec = 0,
+  frameWidth = 1080,
+  frameHeight = 1920,
+  fitMode = "cover",
   textStripPath,
   textStripWidth,
   textStripHeight,
@@ -422,7 +493,13 @@ export async function encodeScrollVideo({
   const crf = process.env.CLOUD_ENCODE_CRF || "28";
   const yExpr = scrollYExpr({ startDelay, startY, endY, speedY });
   const dur = Math.max(0.1, Number(totalDuration) || 1);
-  const filter = buildScrollFilter(yExpr, textOffsetY);
+  const hasOverlay = !!overlayPath;
+  const filter = buildScrollFilter(yExpr, textOffsetY, {
+    overlayInputIndex: hasOverlay ? 2 : null,
+    overlayWidth: frameWidth,
+    overlayHeight: frameHeight,
+    overlayFitMode: fitMode,
+  });
 
   const args = ["-y"];
 
@@ -444,8 +521,18 @@ export async function encodeScrollVideo({
     dur,
   });
 
+  appendOverlayInput(args, {
+    overlayPath,
+    fps,
+    dur,
+    overlayIsVideo,
+    overlayDurationSec,
+    timeOffsetSec: 0,
+  });
+
   const hasMusic = !!musicPath;
   const hasVoice = !!voicePath;
+  const audioStartIndex = hasOverlay ? 3 : 2;
 
   if (hasMusic) {
     if (musicLoop) args.push("-stream_loop", "-1");
@@ -462,11 +549,11 @@ export async function encodeScrollVideo({
     const parts = [];
     if (hasMusic) {
       const mv = Math.max(0, Math.min(2, musicVolume / 100));
-      parts.push(`[2:a]volume=${mv}[m]`);
+      parts.push(`[${audioStartIndex}:a]volume=${mv}[m]`);
       mapAudio = "[m]";
     }
     if (hasVoice) {
-      const voiceIdx = hasMusic ? 3 : 2;
+      const voiceIdx = hasMusic ? audioStartIndex + 1 : audioStartIndex;
       const vv = Math.max(0, Math.min(2, voiceVolume / 100));
       if (hasMusic) {
         parts.push(`[${voiceIdx}:a]volume=${vv}[v]`, `[m][v]amix=inputs=2:duration=first:dropout_transition=0[aout]`);
@@ -481,7 +568,13 @@ export async function encodeScrollVideo({
 
   args.push("-filter_complex", filterComplex, "-map", "[vout]");
   if (mapAudio) args.push("-map", mapAudio);
-  args.push(...videoEncodeArgs(preset, crf, { stillImage: !backgroundIsVideo }), "-t", String(dur));
+  args.push(
+    ...videoEncodeArgs(preset, crf, {
+      stillImage: !backgroundIsVideo && !overlayIsVideo,
+    }),
+    "-t",
+    String(dur)
+  );
   if (mapAudio) {
     args.push("-c:a", "aac", "-b:a", "192k", "-shortest");
   }
@@ -512,6 +605,14 @@ export async function writeRawRgba(canvas, filePath) {
 
 export function localMediaPath(tmpDir, field, fileMeta) {
   const fileName = fileMeta?.[field]?.fileName || field;
-  const ext = path.extname(fileName) || (field === "background" ? ".jpg" : field === "music" || field === "voiceover" ? ".mp3" : "");
+  const ext =
+    path.extname(fileName) ||
+    (field === "background"
+      ? ".jpg"
+      : field === "overlay"
+        ? ".png"
+        : field === "music" || field === "voiceover"
+          ? ".mp3"
+          : "");
   return path.join(tmpDir, `${field}${ext}`);
 }

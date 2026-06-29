@@ -42,7 +42,7 @@ export function parseProjectDocument(raw) {
     throw badRequest("Invalid media block.");
   }
   if (meta.embedMedia === true && doc.media) {
-    for (const key of ["background", "music", "voiceover"]) {
+    for (const key of ["background", "overlay", "music", "voiceover"]) {
       const item = doc.media[key];
       if (item?.dataUrl && !String(item.dataUrl).startsWith("data:")) {
         throw badRequest(`Media ${key} must use embedded data URLs only.`);

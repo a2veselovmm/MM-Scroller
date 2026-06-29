@@ -528,19 +528,16 @@ function isVideoFilePath(filePath) {
   return ext === ".mp4" || ext === ".mov";
 }
 
-function modTime(value, duration) {
-  if (!Number.isFinite(duration) || duration <= 0) return 0;
-  return ((value % duration) + duration) % duration;
-}
-
-function mapPlaybackTime(t, duration, mode = "loop") {
-  if (!Number.isFinite(duration) || duration <= 0) return 0;
-  if (mode === "boomerang") {
-    const period = duration * 2;
-    const phase = modTime(t, period);
-    return phase <= duration ? phase : period - phase;
+function buildFitFilter(width, height, fitMode = "cover", { transparentPad = false } = {}) {
+  const w = Math.max(2, Math.round(Number(width) || 1080));
+  const h = Math.max(2, Math.round(Number(height) || 1920));
+  const fit = fitMode === "contain" ? "contain" : fitMode === "fill" ? "fill" : "cover";
+  if (fit === "fill") return `scale=${w}:${h}`;
+  if (fit === "contain") {
+    const padColor = transparentPad ? "black@0.0" : "black";
+    return `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=${padColor}`;
   }
-  return modTime(t, duration);
+  return `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
 }
 
 function resolveBackgroundVideoMode(settings = {}, media = {}) {
@@ -548,41 +545,6 @@ function resolveBackgroundVideoMode(settings = {}, media = {}) {
   if (settings.bgVideoMode === "boomerang") return "boomerang";
   if (media?.background?.playbackMode === "boomerang") return "boomerang";
   return "loop";
-}
-
-function runFfprobe(args) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn("ffprobe", args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    proc.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    proc.on("close", (code) => {
-      if (code === 0) resolve(stdout.trim());
-      else reject(new Error(stderr.slice(-1200) || `ffprobe exited with code ${code}`));
-    });
-  });
-}
-
-async function probeVideoDurationSec(filePath) {
-  const out = await runFfprobe([
-    "-v",
-    "error",
-    "-show_entries",
-    "format=duration",
-    "-of",
-    "default=noprint_wrappers=1:nokey=1",
-    filePath,
-  ]);
-  const duration = Number(out);
-  if (!Number.isFinite(duration) || duration <= 0) {
-    throw new Error("Could not read background video duration.");
-  }
-  return duration;
 }
 
 async function prepareBackgroundVideo(inputPath, outputPath, ew, eh, fitMode = "cover") {
@@ -702,6 +664,7 @@ async function main() {
   );
 
   const bgPath = await firstMediaFile(path.join(bundle, "media", "background"));
+  const overlayPath = await firstMediaFile(path.join(bundle, "media", "overlay"));
   const musicPath = await firstMediaFile(path.join(bundle, "media", "music"));
   const voicePath = await firstMediaFile(path.join(bundle, "media", "voiceover"));
   const tmpDir = await mkdtemp(path.join(os.tmpdir(), "mm-local-render-"));
@@ -711,7 +674,6 @@ async function main() {
   try {
     let bgRenderPath = bgPath;
     let bgIsVideo = false;
-    let bgVideoDuration = 0;
     if (bgPath && isVideoFilePath(bgPath)) {
       bgIsVideo = true;
       const preparedBg = path.join(tmpDir, "background-video-prepared.mp4");
@@ -730,7 +692,12 @@ async function main() {
       } else {
         bgRenderPath = preparedBg;
       }
-      bgVideoDuration = await probeVideoDurationSec(bgRenderPath);
+    }
+
+    let overlayRenderPath = overlayPath;
+    let overlayIsVideo = false;
+    if (overlayRenderPath && isVideoFilePath(overlayRenderPath)) {
+      overlayIsVideo = true;
     }
 
     const yExpr = scrollYExpr({ startDelay, startY, endY, speedY });
@@ -773,10 +740,28 @@ async function main() {
       textPngPath
     );
 
+    if (overlayRenderPath) {
+      if (overlayIsVideo) {
+        args.push("-stream_loop", "-1", "-t", String(totalDuration), "-i", overlayRenderPath);
+      } else {
+        args.push(
+          "-loop",
+          "1",
+          "-framerate",
+          String(FPS),
+          "-t",
+          String(totalDuration),
+          "-i",
+          overlayRenderPath
+        );
+      }
+    }
+
     const hasMusic = !!musicPath;
     const hasVoice = !!voicePath;
-    const musicIndex = hasMusic ? 2 : -1;
-    const voiceIndex = hasVoice ? (hasMusic ? 3 : 2) : -1;
+    const audioStartIndex = overlayRenderPath ? 3 : 2;
+    const musicIndex = hasMusic ? audioStartIndex : -1;
+    const voiceIndex = hasVoice ? (hasMusic ? audioStartIndex + 1 : audioStartIndex) : -1;
     if (hasMusic) {
       if (settings.musicLoop !== false) args.push("-stream_loop", "-1");
       args.push("-i", musicPath);
@@ -786,10 +771,18 @@ async function main() {
     }
 
     const filterParts = [];
-    const videoPart = bgRenderPath
-      ? `[0:v]scale=${ew}:${eh}:force_original_aspect_ratio=increase,crop=${ew}:${eh},format=yuv420p[bg];[bg][1:v]overlay=x=0:y='${overlayYExpr}':eval=frame:format=auto[vout]`
-      : `[0:v]format=yuv420p[bg];[bg][1:v]overlay=x=0:y='${overlayYExpr}':eval=frame:format=auto[vout]`;
-    filterParts.push(videoPart);
+    const basePart = bgRenderPath
+      ? `[0:v]scale=${ew}:${eh}:force_original_aspect_ratio=increase,crop=${ew}:${eh},format=yuv420p[bg];[bg][1:v]overlay=x=0:y='${overlayYExpr}':eval=frame:format=auto[vtxt]`
+      : `[0:v]format=yuv420p[bg];[bg][1:v]overlay=x=0:y='${overlayYExpr}':eval=frame:format=auto[vtxt]`;
+    filterParts.push(basePart);
+    if (overlayRenderPath) {
+      filterParts.push(
+        `[2:v]${buildFitFilter(ew, eh, settings.fitMode || "cover", { transparentPad: true })},format=rgba[ovr]`,
+        "[vtxt][ovr]overlay=x=0:y=0:eval=frame:format=auto[vout]"
+      );
+    } else {
+      filterParts.push("[vtxt]null[vout]");
+    }
 
     let audioMap = null;
     if (hasMusic || hasVoice) {

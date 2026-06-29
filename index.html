@@ -26,7 +26,7 @@
     <aside class="controls-panel" id="controls-panel" aria-label="Controls">
       <div class="control-tabs" role="tablist" aria-label="Control groups">
         <button type="button" class="control-tab is-active" role="tab" id="control-tab-text" data-tab="text" aria-selected="true" aria-controls="tab-panel-text" tabindex="0">Text</button>
-        <button type="button" class="control-tab" role="tab" id="control-tab-background" data-tab="background" aria-selected="false" aria-controls="tab-panel-background" tabindex="-1">Background</button>
+        <button type="button" class="control-tab" role="tab" id="control-tab-background" data-tab="background" aria-selected="false" aria-controls="tab-panel-background" tabindex="-1">Video / Image</button>
         <button type="button" class="control-tab" role="tab" id="control-tab-audio" data-tab="audio" aria-selected="false" aria-controls="tab-panel-audio" tabindex="-1">Audio</button>
         <button type="button" class="control-tab" role="tab" id="control-tab-settings" data-tab="settings" aria-selected="false" aria-controls="tab-panel-settings" tabindex="-1">Settings</button>
       </div>
@@ -204,15 +204,27 @@
       </div>
 
       <div id="tab-panel-background" class="control-tab-panel" role="tabpanel" aria-labelledby="control-tab-background" hidden>
+      <details class="collapsible" id="collapsible-overlay-media" open>
+        <summary class="collapsible-summary">Overlay</summary>
+        <div class="collapsible-body">
+        <label class="control-label file-upload">
+          <span class="btn btn-secondary btn-block">Upload overlay image/video</span>
+          <input type="file" id="overlay-upload" accept="image/png,video/mp4,video/quicktime,.png,.mp4,.mov" hidden />
+        </label>
+        <p id="overlay-filename" class="hint">No file — overlay disabled</p>
+        <p class="hint">Supports transparent PNG and MOV/MP4 video overlays.</p>
+        </div>
+      </details>
+
       <details class="collapsible" id="collapsible-bg-image" open>
-        <summary class="collapsible-summary">Background media</summary>
+        <summary class="collapsible-summary">Background</summary>
         <div class="collapsible-body">
         <label class="control-label file-upload">
           <span class="btn btn-secondary btn-block">Upload background image/video</span>
           <input type="file" id="bg-upload" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,.mp4,.mov" hidden />
         </label>
         <p id="bg-filename" class="hint">No file — gradient placeholder</p>
-        <p class="hint">Cloud size limits: background video up to 100 MB; music/voiceover up to 15 MB each.</p>
+        <p class="hint">Cloud size limits: background/overlay video up to 100 MB each; music/voiceover up to 15 MB each.</p>
 
         <div id="bg-video-options" class="hidden">
           <label class="control-label" for="bg-video-mode">If video is shorter than timeline</label>
@@ -347,7 +359,7 @@
         </p>
         <label class="control-label checkbox-row">
           <input type="checkbox" id="export-setup-embed-media" checked />
-          Embed background, music, and voiceover (larger file)
+          Embed background, overlay, music, and voiceover (larger file)
         </label>
         <button type="button" id="btn-export-setup" class="btn btn-secondary btn-block">
           Export setup (JSON)
@@ -381,6 +393,10 @@
           <div class="bg-color-overlay hidden" id="bg-color-overlay" aria-hidden="true"></div>
           <div class="text-scroll-container" id="text-scroll-container">
             <div id="text-content" class="text-content"></div>
+          </div>
+          <div class="overlay-layer" id="overlay-layer">
+            <img id="overlay-image" class="overlay-media hidden" alt="" />
+            <video id="overlay-video" class="overlay-media hidden" muted playsinline preload="auto"></video>
           </div>
           </div>
         </div>
@@ -462,7 +478,7 @@
             <strong>Render in this tab</strong>
             <small>Uses your browser. Best for short 1-2 min scrollers.</small>
             <small id="export-choice-browser-video-warning" class="export-choice-warning hidden">
-              Video background detected: browser render may take extremely long and can fail on some machines.
+              Video background/overlay detected: browser render may take extremely long and can fail on some machines.
             </small>
           </span>
         </label>
@@ -471,7 +487,7 @@
           <span>
             <strong>Send to cloud queue</strong>
             <small>Uploads project to GCP. Best for batches and remote rendering.</small>
-            <small>Cloud limits: background video up to 100 MB; music/voiceover up to 15 MB each.</small>
+            <small>Cloud limits: background/overlay video up to 100 MB each; music/voiceover up to 15 MB each.</small>
           </span>
         </label>
         <label class="export-choice-option">

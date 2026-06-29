@@ -94,7 +94,7 @@ function resolvePlainText(text) {
   return text.plainText || stripHtml(text.styledHtml);
 }
 
-function isVideoBackgroundPath(filePath) {
+function isVideoMediaPath(filePath) {
   if (!filePath) return false;
   const ext = path.extname(String(filePath)).toLowerCase();
   return ext === ".mp4" || ext === ".mov";
@@ -258,7 +258,7 @@ export async function prepareRenderAssets({
   renderPlan = null,
 }) {
   await mkdir(workDir, { recursive: true });
-  if (isVideoBackgroundPath(backgroundPath)) {
+  if (isVideoMediaPath(backgroundPath)) {
     throw new Error("Segmented render staging is not supported for video backgrounds.");
   }
 
@@ -356,6 +356,7 @@ export async function renderJob({
   project,
   backgroundPath,
   preprocessedBackgroundPath,
+  overlayPath,
   musicPath,
   voicePath,
   outputPath,
@@ -390,6 +391,11 @@ export async function renderJob({
   let textOffsetY = 0;
   let backgroundIsVideo = false;
   let backgroundDurationSec = 0;
+  let overlayInputPath = overlayPath || null;
+  let overlayIsVideo = false;
+  let overlayDurationSec = 0;
+  let frameWidth = 0;
+  let frameHeight = 0;
   const timings = { fontsMs: 0, canvasMs: 0, ffmpegMs: 0 };
 
   if (stagedAssets) {
@@ -404,8 +410,10 @@ export async function renderJob({
     const timeline = project.timeline || {};
     const text = project.text || {};
     const aspectRatio = settings.aspectRatio || "9/16";
-    const { height: eh } = getExportCanvasSize(aspectRatio);
+    const { width: ew, height: eh } = getExportCanvasSize(aspectRatio);
     const { height: designHeight } = getDesignCanvasSize(aspectRatio);
+    frameWidth = ew;
+    frameHeight = eh;
     const yScale = eh / designHeight;
     const engine = new ScrollEngine(settings, timeline, textStripHeight / yScale);
     engine.measure(designHeight);
@@ -430,6 +438,8 @@ export async function renderJob({
       checkCancelled,
     });
     const { engine, yScale, bgCache, textCanvas } = built;
+    frameWidth = built.ew;
+    frameHeight = built.eh;
     timings.fontsMs = built.timings?.fontsMs || 0;
     timings.canvasMs = built.timings?.canvasMs || 0;
     totalDuration = engine.getTotalDuration();
@@ -443,7 +453,7 @@ export async function renderJob({
     textStripIsRaw = true;
     textOffsetY = Number(built.textOffsetY || 0);
 
-    const videoBackgroundPath = isVideoBackgroundPath(backgroundPath) ? backgroundPath : null;
+    const videoBackgroundPath = isVideoMediaPath(backgroundPath) ? backgroundPath : null;
     if (videoBackgroundPath) {
       backgroundIsVideo = true;
       const fitMode = settings.fitMode || "cover";
@@ -474,7 +484,16 @@ export async function renderJob({
       bgImagePath = path.join(workDir, "bg.jpg");
       await writeJpeg(bgCache, bgImagePath);
     }
+    if (overlayInputPath && isVideoMediaPath(overlayInputPath)) {
+      overlayIsVideo = true;
+      overlayDurationSec = await probeVideoDurationSec(overlayInputPath);
+    }
     await writeRawRgba(textCanvas, textStripPath);
+  }
+
+  if (overlayInputPath && !overlayIsVideo && isVideoMediaPath(overlayInputPath)) {
+    overlayIsVideo = true;
+    overlayDurationSec = await probeVideoDurationSec(overlayInputPath);
   }
 
   await reportProgress(40, "Encoding scroll video with ffmpeg…");
@@ -487,6 +506,12 @@ export async function renderJob({
     bgImagePath,
     backgroundIsVideo,
     backgroundDurationSec,
+    overlayPath: overlayInputPath,
+    overlayIsVideo,
+    overlayDurationSec,
+    frameWidth,
+    frameHeight,
+    fitMode: settings.fitMode || "cover",
     textStripPath,
     textStripWidth,
     textStripHeight,

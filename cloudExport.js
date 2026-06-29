@@ -10,12 +10,17 @@ function formatMb(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1);
 }
 
-function isBackgroundVideoUpload(field, item) {
-  if (field !== "background" || !item?.blob) return false;
+function isVideoMediaUpload(field, item) {
+  if (!item?.blob) return false;
+  if (field !== "background" && field !== "overlay") return false;
   const mime = String(item.mimeType || item.blob.type || "").toLowerCase();
   if (mime.startsWith("video/")) return true;
   const name = String(item.fileName || "").toLowerCase();
   return name.endsWith(".mp4") || name.endsWith(".mov");
+}
+
+function mediaUploadLabel(field) {
+  return field === "overlay" ? "Overlay video" : "Background video";
 }
 
 export function apiBase() {
@@ -75,12 +80,16 @@ async function putToJobApi(jobId, field, blob, contentType, { getIdToken, betaKe
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     if (
-      field === "background" &&
+      isVideoMediaUpload(field, {
+        blob,
+        fileName: field,
+        mimeType: contentType || blob?.type,
+      }) &&
       blob?.size > LIMITS.maxProxyUploadBytes &&
       (res.status >= 500 || res.status === 413)
     ) {
       throw new Error(
-        `Background video is ${formatMb(blob.size)}MB. Current cloud upload path supports up to ~${formatMb(LIMITS.maxProxyUploadBytes)}MB per file.`
+        `${mediaUploadLabel(field)} is ${formatMb(blob.size)}MB. Current cloud upload path supports up to ~${formatMb(LIMITS.maxProxyUploadBytes)}MB per file.`
       );
     }
     throw new Error(data.error || `Upload failed for ${field} (${res.status})`);
@@ -177,9 +186,16 @@ export async function createAndUploadCloudJob(opts) {
         await putToSignedUploadUrl(signedUrl, blob, mimeType);
         uploaded = true;
       } catch (signedErr) {
-        if (field === "background" && blob?.size > LIMITS.maxProxyUploadBytes) {
+        if (
+          isVideoMediaUpload(field, {
+            blob,
+            fileName: field,
+            mimeType,
+          }) &&
+          blob?.size > LIMITS.maxProxyUploadBytes
+        ) {
           throw new Error(
-            `Background video is ${formatMb(blob.size)}MB and signed browser upload failed (${signedErr.message}). Please retry or use Download render script.`
+            `${mediaUploadLabel(field)} is ${formatMb(blob.size)}MB and signed browser upload failed (${signedErr.message}). Please retry or use Download render script.`
           );
         }
       }

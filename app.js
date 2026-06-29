@@ -98,6 +98,10 @@ const state = {
   bgMediaType: "image",
   bgVideoMode: "loop",
   bgVideoDuration: 0,
+  overlayUrl: null,
+  hasOverlayMedia: false,
+  overlayMediaType: "image",
+  overlayVideoDuration: 0,
   bold: false,
   italic: false,
   editMode: "styled",
@@ -120,6 +124,8 @@ const viewLabelStyled = $("view-label-styled");
 const textContainer = $("text-scroll-container");
 const bgImage = $("bg-image");
 const bgVideo = $("bg-video");
+const overlayImage = $("overlay-image");
+const overlayVideo = $("overlay-video");
 const bgMusic = $("bg-music");
 const bgVoice = $("bg-voice");
 const bgPlaceholder = $("bg-placeholder");
@@ -151,6 +157,8 @@ let lastStyledHtml = "";
 let plainOnModeEnter = "";
 let fontPickerApi = null;
 let pendingQueuedExportTarget = "cloud";
+let overlayObjectUrl = null;
+let overlaySourceUrl = null;
 
 const undoManager = createUndoManager(captureUndoSnapshot, applyUndoSnapshot);
 
@@ -165,9 +173,9 @@ function performUndo() {
 }
 
 function captureUndoSnapshot() {
-  const { bgUrl, ...stateCopy } = state;
+  const { bgUrl, overlayUrl, ...stateCopy } = state;
   return {
-    state: { ...stateCopy, bgUrl },
+    state: { ...stateCopy, bgUrl, overlayUrl },
     lastStyledHtml: textEditor.innerHTML,
     plainText: textPlain.value,
     plainOnModeEnter,
@@ -723,8 +731,42 @@ function syncBackgroundVideo(time, { isPlaying = false } = {}) {
   }
 }
 
+function syncOverlayVideo(time, { isPlaying = false } = {}) {
+  if (!state.hasOverlayMedia || state.overlayMediaType !== "video" || !overlayVideo?.src) return;
+  const dur = state.overlayVideoDuration || overlayVideo.duration;
+  if (!dur || !Number.isFinite(dur)) return;
+  const target = mapBackgroundTime(time, dur, "loop");
+
+  if (isPlaying) {
+    overlayVideo.loop = true;
+    const drift = Math.abs((overlayVideo.currentTime || 0) - target);
+    if (!Number.isFinite(overlayVideo.currentTime) || drift > 0.35) {
+      try {
+        overlayVideo.currentTime = target;
+      } catch {
+        /* ignore seek errors until metadata is ready */
+      }
+    }
+    if (overlayVideo.paused || overlayVideo.ended) {
+      overlayVideo.play().catch(() => {});
+    }
+    return;
+  }
+
+  overlayVideo.loop = false;
+  overlayVideo.pause();
+  if (!Number.isFinite(overlayVideo.currentTime) || Math.abs(overlayVideo.currentTime - target) > 0.04) {
+    try {
+      overlayVideo.currentTime = target;
+    } catch {
+      /* ignore seek errors until metadata is ready */
+    }
+  }
+}
+
 function syncTimelineAudio(time, { isPlaying = false } = {}) {
   syncBackgroundVideo(time, { isPlaying });
+  syncOverlayVideo(time, { isPlaying });
   syncAudioTrack(bgMusic, time, state.musicVolume, {
     isPlaying,
     mode: state.musicLoop ? "loop" : "once",
@@ -741,6 +783,7 @@ function applyMusicLoop() {
 
 function pauseTimelineAudio() {
   if (bgVideo.src) bgVideo.pause();
+  if (overlayVideo.src) overlayVideo.pause();
   if (bgMusic.src) bgMusic.pause();
   if (bgVoice.src) bgVoice.pause();
 }
@@ -952,6 +995,10 @@ function applyBackground() {
   bgImage.style.objectFit = fit === "fill" ? "fill" : fit;
   bgVideo.dataset.fit = fit;
   bgVideo.style.objectFit = fit === "fill" ? "fill" : fit;
+  overlayImage.dataset.fit = fit;
+  overlayImage.style.objectFit = fit === "fill" ? "fill" : fit;
+  overlayVideo.dataset.fit = fit;
+  overlayVideo.style.objectFit = fit === "fill" ? "fill" : fit;
 
   applyBgEffects();
   engine.applyTime(engine.timelineTime);
@@ -996,7 +1043,7 @@ async function applyBackgroundDisplayUrl(displayUrl) {
   applyBackground();
 }
 
-function isVideoBackgroundFile(file) {
+function isVideoMediaFile(file) {
   const type = String(file?.type || "").toLowerCase();
   if (type.startsWith("video/")) return true;
   const name = String(file?.name || "").toLowerCase();
@@ -1067,7 +1114,7 @@ async function refreshBackgroundRaster() {
 async function loadBackground(file) {
   const imageTypes = ["image/jpeg", "image/png", "image/webp"];
   const videoTypes = ["video/mp4", "video/quicktime"];
-  const isVideo = isVideoBackgroundFile(file);
+  const isVideo = isVideoMediaFile(file);
   const isImage = imageTypes.includes(file.type);
   const typeAllowed = isVideo || isImage || videoTypes.includes(file.type);
   if (!typeAllowed) {
@@ -1102,6 +1149,108 @@ async function loadBackground(file) {
   } catch (err) {
     clearBackground();
     alert(`Could not load background: ${err.message}`);
+  }
+}
+
+function clearOverlay() {
+  if (overlayObjectUrl) URL.revokeObjectURL(overlayObjectUrl);
+  if (overlaySourceUrl && overlaySourceUrl !== overlayObjectUrl) {
+    URL.revokeObjectURL(overlaySourceUrl);
+  }
+  overlayObjectUrl = null;
+  overlaySourceUrl = null;
+  state.overlayUrl = null;
+  state.hasOverlayMedia = false;
+  state.overlayMediaType = "image";
+  state.overlayVideoDuration = 0;
+  overlayImage.classList.add("hidden");
+  overlayImage.removeAttribute("src");
+  overlayVideo.classList.add("hidden");
+  overlayVideo.pause();
+  overlayVideo.removeAttribute("src");
+  overlayVideo.load();
+  $("overlay-filename").textContent = "No file — overlay disabled";
+  syncExportChoiceHints();
+}
+
+async function applyOverlayImageUrl(displayUrl) {
+  state.overlayUrl = displayUrl;
+  state.hasOverlayMedia = true;
+  state.overlayMediaType = "image";
+  state.overlayVideoDuration = 0;
+  overlayVideo.classList.add("hidden");
+  overlayVideo.pause();
+  overlayVideo.removeAttribute("src");
+  overlayVideo.load();
+  overlayImage.src = displayUrl;
+  overlayImage.classList.remove("hidden");
+  syncExportChoiceHints();
+  requestAnimationFrame(() => remeasureAndApply());
+  applyBackground();
+}
+
+async function applyOverlayVideoUrl(displayUrl) {
+  state.overlayUrl = displayUrl;
+  state.hasOverlayMedia = true;
+  state.overlayMediaType = "video";
+  overlayImage.classList.add("hidden");
+  overlayImage.removeAttribute("src");
+  overlayVideo.classList.remove("hidden");
+  syncExportChoiceHints();
+
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("Could not load overlay video."));
+    };
+    overlayVideo.onloadedmetadata = done;
+    overlayVideo.onerror = fail;
+    overlayVideo.src = displayUrl;
+    overlayVideo.load();
+  });
+
+  state.overlayVideoDuration = Number.isFinite(overlayVideo.duration) ? overlayVideo.duration : 0;
+  syncOverlayVideo(engine.timelineTime, { isPlaying: false });
+  requestAnimationFrame(() => remeasureAndApply());
+  applyBackground();
+}
+
+async function loadOverlay(file) {
+  const imageTypes = ["image/png"];
+  const videoTypes = ["video/mp4", "video/quicktime"];
+  const isVideo = isVideoMediaFile(file);
+  const name = String(file?.name || "").toLowerCase();
+  const isImage = imageTypes.includes(file.type) || name.endsWith(".png");
+  const typeAllowed = isVideo || isImage || videoTypes.includes(file.type);
+  if (!typeAllowed) {
+    alert("Overlay must be PNG, MP4, or MOV.");
+    return;
+  }
+
+  if (!undoManager.isRestoring() && !isImporting) pushUndo();
+  clearOverlay();
+
+  const sourceUrl = URL.createObjectURL(file);
+  overlaySourceUrl = sourceUrl;
+  $("overlay-filename").textContent = file.name;
+
+  try {
+    overlayObjectUrl = sourceUrl;
+    if (isVideo) {
+      await applyOverlayVideoUrl(sourceUrl);
+    } else {
+      await applyOverlayImageUrl(sourceUrl);
+    }
+  } catch (err) {
+    clearOverlay();
+    alert(`Could not load overlay: ${err.message}`);
   }
 }
 
@@ -1475,6 +1624,11 @@ function initControls() {
     const file = e.target.files?.[0];
     if (file) loadBackground(file);
   });
+
+  $("overlay-upload").addEventListener("change", (e) => {
+    const file = e.target.files?.[0];
+    if (file) loadOverlay(file);
+  });
 }
 
 function initPanelResize() {
@@ -1576,6 +1730,10 @@ function initTransport() {
       bgVideo.pause();
       bgVideo.currentTime = 0;
     }
+    if (overlayVideo.src) {
+      overlayVideo.pause();
+      overlayVideo.currentTime = 0;
+    }
     if (bgMusic.src) {
       bgMusic.pause();
       bgMusic.currentTime = 0;
@@ -1630,6 +1788,8 @@ async function runExport() {
       bgVideoEl: state.hasBackgroundImage && state.bgMediaType === "video" ? bgVideo : null,
       bgVideoMode: state.bgVideoMode,
       bgVideoDuration: state.bgVideoDuration || bgVideo.duration || 0,
+      overlayVideoEl: state.hasOverlayMedia && state.overlayMediaType === "video" ? overlayVideo : null,
+      overlayVideoDuration: state.overlayVideoDuration || overlayVideo.duration || 0,
       musicEl: bgMusic.src ? bgMusic : null,
       voiceEl: bgVoice.src ? bgVoice : null,
       musicVolume: state.musicVolume,
@@ -1669,7 +1829,7 @@ async function runExport() {
 }
 
 function serializeSettings() {
-  const { bgUrl: _bgUrl, ...settings } = state;
+  const { bgUrl: _bgUrl, overlayUrl: _overlayUrl, ...settings } = state;
   return {
     ...settings,
     backgroundVideoMode: state.bgVideoMode,
@@ -1715,8 +1875,13 @@ function serializeUiState() {
   };
 }
 
+function cleanOverlayFileName(label) {
+  return cleanBgFileName(String(label || "").replace("No file — overlay disabled", "No file"));
+}
+
 function collectProjectMediaRefs() {
   const bgName = cleanBgFileName($("bg-filename").textContent);
+  const overlayName = cleanOverlayFileName($("overlay-filename").textContent);
   const musicName = $("bg-music-filename").textContent;
   const voiceName = $("bg-voice-filename").textContent;
 
@@ -1726,6 +1891,12 @@ function collectProjectMediaRefs() {
           type: state.bgMediaType === "video" ? "video" : "image",
           fileName: bgName,
           playbackMode: state.bgMediaType === "video" ? state.bgVideoMode : undefined,
+        }
+      : null,
+    overlay: state.hasOverlayMedia && overlayName
+      ? {
+          type: state.overlayMediaType === "video" ? "video" : "image",
+          fileName: overlayName,
         }
       : null,
     music:
@@ -1741,6 +1912,7 @@ function collectProjectMediaRefs() {
 
 async function collectProjectMedia() {
   let background = null;
+  let overlay = null;
 
   const bgSrc =
     state.bgMediaType === "video"
@@ -1753,6 +1925,21 @@ async function collectProjectMedia() {
       {
         type: state.bgMediaType === "video" ? "video" : "image",
         playbackMode: state.bgMediaType === "video" ? state.bgVideoMode : undefined,
+      }
+    );
+  }
+
+  const overlaySrc =
+    state.overlayMediaType === "video"
+      ? overlayVideo.currentSrc || overlayVideo.src
+      : overlayImage.currentSrc || overlayImage.src;
+  if (state.hasOverlayMedia && overlaySrc) {
+    const fallbackName = state.overlayMediaType === "video" ? "overlay.mp4" : "overlay.png";
+    overlay = await urlToDataPayload(
+      overlaySrc,
+      cleanOverlayFileName($("overlay-filename").textContent) || fallbackName,
+      {
+        type: state.overlayMediaType === "video" ? "video" : "image",
       }
     );
   }
@@ -1773,7 +1960,7 @@ async function collectProjectMedia() {
     });
   }
 
-  return { background, music, voiceover };
+  return { background, overlay, music, voiceover };
 }
 
 async function buildSetupDocument(embedMedia) {
@@ -1812,6 +1999,20 @@ async function getMediaBlobsForCloud() {
       fileName,
       mimeType:
         blob.type || (state.bgMediaType === "video" ? "video/mp4" : "image/jpeg"),
+    };
+  }
+  const overlaySrc =
+    state.overlayMediaType === "video"
+      ? overlayVideo.currentSrc || overlayVideo.src
+      : overlayImage.currentSrc || overlayImage.src;
+  if (state.hasOverlayMedia && overlaySrc) {
+    const defaultName = state.overlayMediaType === "video" ? "overlay.mp4" : "overlay.png";
+    const fileName = cleanOverlayFileName($("overlay-filename").textContent) || defaultName;
+    const blob = await blobFromObjectUrl(overlaySrc);
+    out.overlay = {
+      blob,
+      fileName,
+      mimeType: blob.type || (state.overlayMediaType === "video" ? "video/mp4" : "image/png"),
     };
   }
   const musicName = $("bg-music-filename").textContent;
@@ -2283,10 +2484,20 @@ function syncExportChoiceHints() {
   const warning = $("export-choice-browser-video-warning");
   if (!warning) return;
   const hasVideoBackground = state.hasBackgroundImage && state.bgMediaType === "video";
-  warning.classList.toggle("hidden", !hasVideoBackground);
+  const hasVideoOverlay = state.hasOverlayMedia && state.overlayMediaType === "video";
+  warning.classList.toggle("hidden", !(hasVideoBackground || hasVideoOverlay));
 }
 
-const STATE_MEDIA_KEYS = new Set(["bgUrl", "hasBackgroundImage", "bgMediaType", "bgVideoDuration"]);
+const STATE_MEDIA_KEYS = new Set([
+  "bgUrl",
+  "hasBackgroundImage",
+  "bgMediaType",
+  "bgVideoDuration",
+  "overlayUrl",
+  "hasOverlayMedia",
+  "overlayMediaType",
+  "overlayVideoDuration",
+]);
 
 function applySettingsFromDocument(settings) {
   if (!settings || typeof settings !== "object") return;
@@ -2364,6 +2575,7 @@ function applyUiFromDocument(ui) {
 
 async function applyMediaFromDocument(media) {
   clearBackground();
+  clearOverlay();
   clearMusic();
   clearVoiceover();
 
@@ -2402,6 +2614,19 @@ async function applyMediaFromDocument(media) {
     }
   } else if (bg?.fileName) {
     $("bg-filename").textContent = `${bg.fileName} (not embedded — re-upload)`;
+  }
+
+  const overlay = media.overlay;
+  if (overlay?.dataUrl || overlay?.downloadUrl || overlay?.url) {
+    try {
+      const file = await mediaPayloadToFile(overlay, "overlay");
+      await loadOverlay(file);
+    } catch (err) {
+      console.warn(err);
+      $("overlay-filename").textContent = `${overlay.fileName || "overlay"} (import failed)`;
+    }
+  } else if (overlay?.fileName) {
+    $("overlay-filename").textContent = `${overlay.fileName} (not embedded — re-upload)`;
   }
 
   const music = media.music;

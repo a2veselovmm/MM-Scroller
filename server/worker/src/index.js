@@ -157,6 +157,12 @@ async function downloadJobMedia(job, tmp) {
     downloads.push(downloadToFile(job.uploadPaths.preprocessedBackground, preprocessedBackgroundPath));
   }
 
+  let overlayPath = null;
+  if (job.uploadPaths?.overlay) {
+    overlayPath = localMediaPath(tmp, "overlay", fileMeta);
+    downloads.push(downloadToFile(job.uploadPaths.overlay, overlayPath));
+  }
+
   let musicPath = null;
   if (job.uploadPaths?.music) {
     musicPath = localMediaPath(tmp, "music", fileMeta);
@@ -171,7 +177,15 @@ async function downloadJobMedia(job, tmp) {
 
   await Promise.all(downloads);
   const project = validateProject(JSON.parse(await readFile(projectLocal, "utf8")));
-  return { project, backgroundPath, preprocessedBackgroundPath, musicPath, voicePath, fileMeta };
+  return {
+    project,
+    backgroundPath,
+    preprocessedBackgroundPath,
+    overlayPath,
+    musicPath,
+    voicePath,
+    fileMeta,
+  };
 }
 
 function forceJobProgress(jobId, progress, statusMessage) {
@@ -201,7 +215,7 @@ function makeProgressHandlers(jobId) {
 }
 
 async function processSinglePass(jobId, job, tmp) {
-  const { project, backgroundPath, preprocessedBackgroundPath, musicPath, voicePath, fileMeta } =
+  const { project, backgroundPath, preprocessedBackgroundPath, overlayPath, musicPath, voicePath, fileMeta } =
     await downloadJobMedia(job, tmp);
   const timer = createTimer();
   timer.mark("downloadMs");
@@ -218,6 +232,7 @@ async function processSinglePass(jobId, job, tmp) {
     project,
     backgroundPath,
     preprocessedBackgroundPath,
+    overlayPath,
     musicPath,
     voicePath,
     outputPath: outputLocal,

@@ -6,7 +6,7 @@ export const LIMITS = {
   maxFileBytes: 15 * 1024 * 1024,
   maxBackgroundVideoBytes: 100 * 1024 * 1024,
   maxProxyUploadBytes: 30 * 1024 * 1024,
-  maxTotalBytes: 130 * 1024 * 1024,
+  maxTotalBytes: 230 * 1024 * 1024,
   maxDurationSec: 1800,
   jobsPerHour: 3,
   jobsPerDay: 10,
@@ -48,4 +48,4 @@ export const JOB_STATUS = {
   CANCELLED: "cancelled",
 };
 
-export const MEDIA_FIELDS = ["background", "music", "voiceover"];
+export const MEDIA_FIELDS = ["background", "overlay", "music", "voiceover"];
