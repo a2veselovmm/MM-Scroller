@@ -161,6 +161,8 @@ let pendingQueuedExportTarget = "cloud";
 let overlayObjectUrl = null;
 let overlaySourceUrl = null;
 let activeSetupJobId = null;
+let bgMediaLoadVersion = 0;
+let overlayMediaLoadVersion = 0;
 
 const undoManager = createUndoManager(captureUndoSnapshot, applyUndoSnapshot);
 
@@ -1035,7 +1037,8 @@ async function removeMediaFromActiveSetup(field) {
   }
 }
 
-function clearBackground() {
+function clearBackground({ invalidatePending = true } = {}) {
+  if (invalidatePending) bgMediaLoadVersion += 1;
   if (bgObjectUrl) URL.revokeObjectURL(bgObjectUrl);
   if (bgSourceUrl && bgSourceUrl !== bgObjectUrl) URL.revokeObjectURL(bgSourceUrl);
   bgObjectUrl = null;
@@ -1057,6 +1060,8 @@ function clearBackground() {
   $("bg-filename").textContent = "No file — gradient placeholder";
   syncExportChoiceHints();
   syncMediaClearButtons();
+  applyBackground();
+  requestAnimationFrame(() => remeasureAndApply());
 }
 
 async function applyBackgroundDisplayUrl(displayUrl) {
@@ -1152,10 +1157,16 @@ async function loadBackground(file) {
   }
 
   if (!undoManager.isRestoring() && !isImporting) pushUndo();
+  const loadVersion = ++bgMediaLoadVersion;
   await removeMediaFromActiveSetup("background");
-  clearBackground();
+  if (loadVersion !== bgMediaLoadVersion) return;
+  clearBackground({ invalidatePending: false });
 
   const sourceUrl = URL.createObjectURL(file);
+  if (loadVersion !== bgMediaLoadVersion) {
+    URL.revokeObjectURL(sourceUrl);
+    return;
+  }
   bgSourceUrl = sourceUrl;
   $("bg-filename").textContent = file.name;
 
@@ -1167,22 +1178,26 @@ async function loadBackground(file) {
       state.bgMediaType = "image";
       $("bg-video-options").classList.add("hidden");
       const img = await loadImageElement(sourceUrl);
+      if (loadVersion !== bgMediaLoadVersion) return;
       const optimized = await rasterizeBackgroundToCanvasSize(
         img,
         state.aspectRatio,
         state.fitMode
       );
+      if (loadVersion !== bgMediaLoadVersion) return;
       bgObjectUrl = optimized ?? sourceUrl;
       state.hasBackgroundImage = true;
       await applyBackgroundDisplayUrl(bgObjectUrl);
     }
   } catch (err) {
+    if (loadVersion !== bgMediaLoadVersion) return;
     clearBackground();
     alert(`Could not load background: ${err.message}`);
   }
 }
 
-function clearOverlay() {
+function clearOverlay({ invalidatePending = true } = {}) {
+  if (invalidatePending) overlayMediaLoadVersion += 1;
   if (overlayObjectUrl) URL.revokeObjectURL(overlayObjectUrl);
   if (overlaySourceUrl && overlaySourceUrl !== overlayObjectUrl) {
     URL.revokeObjectURL(overlaySourceUrl);
@@ -1202,6 +1217,8 @@ function clearOverlay() {
   $("overlay-filename").textContent = "No file — overlay disabled";
   syncExportChoiceHints();
   syncMediaClearButtons();
+  applyBackground();
+  requestAnimationFrame(() => remeasureAndApply());
 }
 
 async function applyOverlayImageUrl(displayUrl) {
@@ -1268,10 +1285,16 @@ async function loadOverlay(file) {
   }
 
   if (!undoManager.isRestoring() && !isImporting) pushUndo();
+  const loadVersion = ++overlayMediaLoadVersion;
   await removeMediaFromActiveSetup("overlay");
-  clearOverlay();
+  if (loadVersion !== overlayMediaLoadVersion) return;
+  clearOverlay({ invalidatePending: false });
 
   const sourceUrl = URL.createObjectURL(file);
+  if (loadVersion !== overlayMediaLoadVersion) {
+    URL.revokeObjectURL(sourceUrl);
+    return;
+  }
   overlaySourceUrl = sourceUrl;
   $("overlay-filename").textContent = file.name;
 
@@ -1283,6 +1306,7 @@ async function loadOverlay(file) {
       await applyOverlayImageUrl(sourceUrl);
     }
   } catch (err) {
+    if (loadVersion !== overlayMediaLoadVersion) return;
     clearOverlay();
     alert(`Could not load overlay: ${err.message}`);
   }
