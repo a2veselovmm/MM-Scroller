@@ -292,6 +292,14 @@ export async function fetchJobSetup(jobId, { getIdToken, betaKey, embedMedia = t
   return apiFetch(`/jobs/${jobId}/setup${query}`, { getIdToken, betaKey });
 }
 
+export async function clearJobMedia(jobId, field, { getIdToken, betaKey } = {}) {
+  return apiFetch(`/jobs/${jobId}/media/${field}`, {
+    method: "DELETE",
+    getIdToken,
+    betaKey,
+  });
+}
+
 export async function deleteCloudJob(jobId, { getIdToken, betaKey } = {}) {
   return apiFetch(`/jobs/${jobId}`, { method: "DELETE", getIdToken, betaKey });
 }

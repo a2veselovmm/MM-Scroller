@@ -108,6 +108,22 @@ export async function readObject(config, objectPath) {
 }
 
 /**
+ * @param {ReturnType<import('./config.js').loadConfig>} config
+ * @param {string} objectPath
+ */
+export async function deleteObject(config, objectPath) {
+  if (!objectPath) return;
+  await getBucket(config)
+    .file(objectPath)
+    .delete({ ignoreNotFound: true })
+    .catch((err) => {
+      const code = Number(err?.code || 0);
+      if (code === 404) return;
+      throw err;
+    });
+}
+
+/**
  * Delete export artifacts (segments + output) for a job retry.
  * @param {ReturnType<import('./config.js').loadConfig>} config
  * @param {string} jobId

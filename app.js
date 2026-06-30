@@ -10,7 +10,7 @@ import {
   triggerDownload,
   isActive,
 } from "./renderQueue.js";
-import { fetchJobSetup } from "./cloudExport.js";
+import { fetchJobSetup, clearJobMedia } from "./cloudExport.js";
 import { expandEmojiShortcodes, expandShortcodesInEditable } from "./emojiShortcodes.js";
 import {
   loadImageElement,
@@ -160,6 +160,7 @@ let fontPickerApi = null;
 let pendingQueuedExportTarget = "cloud";
 let overlayObjectUrl = null;
 let overlaySourceUrl = null;
+let activeSetupJobId = null;
 
 const undoManager = createUndoManager(captureUndoSnapshot, applyUndoSnapshot);
 
@@ -303,6 +304,7 @@ function applyStateToControls() {
   applyMediaVolume(bgMusic, state.musicVolume);
   applyMediaVolume(bgVoice, state.voiceVolume);
   bgMusic.loop = state.musicLoop;
+  syncMediaClearButtons();
 }
 
 function syncBgBoomerangWarning() {
@@ -1013,6 +1015,26 @@ function setAspectRatio(ratio) {
   syncPreviewLayout();
 }
 
+function syncMediaClearButtons() {
+  const bgClear = $("bg-clear");
+  if (bgClear) bgClear.disabled = !state.hasBackgroundImage;
+  const overlayClear = $("overlay-clear");
+  if (overlayClear) overlayClear.disabled = !state.hasOverlayMedia;
+}
+
+async function removeMediaFromActiveSetup(field) {
+  if (!activeSetupJobId) return;
+  if (field !== "background" && field !== "overlay") return;
+  try {
+    await clearJobMedia(activeSetupJobId, field);
+  } catch (err) {
+    console.warn(err);
+    alert(
+      `Cleared locally, but backend media delete failed: ${err.message}. You can still delete the queue item to remove bucket files.`
+    );
+  }
+}
+
 function clearBackground() {
   if (bgObjectUrl) URL.revokeObjectURL(bgObjectUrl);
   if (bgSourceUrl && bgSourceUrl !== bgObjectUrl) URL.revokeObjectURL(bgSourceUrl);
@@ -1034,6 +1056,7 @@ function clearBackground() {
   bgPlaceholder.classList.remove("hidden");
   $("bg-filename").textContent = "No file — gradient placeholder";
   syncExportChoiceHints();
+  syncMediaClearButtons();
 }
 
 async function applyBackgroundDisplayUrl(displayUrl) {
@@ -1043,6 +1066,7 @@ async function applyBackgroundDisplayUrl(displayUrl) {
   bgImage.classList.remove("hidden");
   bgPlaceholder.classList.add("hidden");
   syncExportChoiceHints();
+  syncMediaClearButtons();
   requestAnimationFrame(() => remeasureAndApply());
   applyBackground();
 }
@@ -1066,6 +1090,7 @@ async function applyBackgroundVideoUrl(displayUrl) {
   resetBgVideoSeekState();
   syncBgBoomerangWarning();
   syncExportChoiceHints();
+  syncMediaClearButtons();
 
   await new Promise((resolve, reject) => {
     let settled = false;
@@ -1127,6 +1152,7 @@ async function loadBackground(file) {
   }
 
   if (!undoManager.isRestoring() && !isImporting) pushUndo();
+  await removeMediaFromActiveSetup("background");
   clearBackground();
 
   const sourceUrl = URL.createObjectURL(file);
@@ -1175,6 +1201,7 @@ function clearOverlay() {
   overlayVideo.load();
   $("overlay-filename").textContent = "No file — overlay disabled";
   syncExportChoiceHints();
+  syncMediaClearButtons();
 }
 
 async function applyOverlayImageUrl(displayUrl) {
@@ -1189,6 +1216,7 @@ async function applyOverlayImageUrl(displayUrl) {
   overlayImage.src = displayUrl;
   overlayImage.classList.remove("hidden");
   syncExportChoiceHints();
+  syncMediaClearButtons();
   requestAnimationFrame(() => remeasureAndApply());
   applyBackground();
 }
@@ -1201,6 +1229,7 @@ async function applyOverlayVideoUrl(displayUrl) {
   overlayImage.removeAttribute("src");
   overlayVideo.classList.remove("hidden");
   syncExportChoiceHints();
+  syncMediaClearButtons();
 
   await new Promise((resolve, reject) => {
     let settled = false;
@@ -1239,6 +1268,7 @@ async function loadOverlay(file) {
   }
 
   if (!undoManager.isRestoring() && !isImporting) pushUndo();
+  await removeMediaFromActiveSetup("overlay");
   clearOverlay();
 
   const sourceUrl = URL.createObjectURL(file);
@@ -1635,9 +1665,23 @@ function initControls() {
     if (file) loadBackground(file);
   });
 
+  $("bg-clear")?.addEventListener("click", async () => {
+    if (!state.hasBackgroundImage) return;
+    if (!undoManager.isRestoring() && !isImporting) pushUndo();
+    clearBackground();
+    await removeMediaFromActiveSetup("background");
+  });
+
   $("overlay-upload").addEventListener("change", (e) => {
     const file = e.target.files?.[0];
     if (file) loadOverlay(file);
+  });
+
+  $("overlay-clear")?.addEventListener("click", async () => {
+    if (!state.hasOverlayMedia) return;
+    if (!undoManager.isRestoring() && !isImporting) pushUndo();
+    clearOverlay();
+    await removeMediaFromActiveSetup("overlay");
   });
 }
 
@@ -2384,11 +2428,13 @@ async function reEditJobFromQueue(jobId, triggerBtn) {
     triggerBtn.textContent = "Loading…";
   }
   isImporting = true;
+  activeSetupJobId = null;
 
   try {
     const { setup } = await fetchJobSetup(jobId);
     const doc = parseProjectDocument(setup);
     await applyProjectDocument(doc);
+    activeSetupJobId = jobId;
     undoManager.reset();
     playbackStatus.textContent = "Project loaded from render queue";
   } catch (err) {
@@ -2669,6 +2715,7 @@ async function applyMediaFromDocument(media) {
 async function applyProjectDocument(doc) {
   engine.stop();
   pauseTimelineAudio();
+  activeSetupJobId = null;
 
   applySettingsFromDocument(doc.settings);
   applyImportedText(doc.text);
@@ -2898,6 +2945,7 @@ function init() {
   syncPreviewLayout();
   syncFromEditor();
   applyBackground();
+  syncMediaClearButtons();
   engine.speed = state.scrollSpeed;
   engine.startDelay = state.startDelay;
   updateScrollPositionControls();

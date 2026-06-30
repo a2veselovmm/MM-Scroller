@@ -6,6 +6,7 @@ import { validateProjectForQueue } from "../../shared/projectValidation.js";
 import { getJobsCollection } from "../firestore.js";
 import {
   exportObjectPath,
+  deleteObject,
   deleteJobObjects,
   deleteExportArtifacts,
   mediaObjectPath,
@@ -32,6 +33,7 @@ const CANCELLABLE = new Set([
 ]);
 
 const RETRYABLE = new Set([JOB_STATUS.CANCELLED, JOB_STATUS.FAILED]);
+const CLEARABLE_MEDIA_FIELDS = new Set(["background", "overlay"]);
 
 function localScriptBundlePath(jobId) {
   return `exports/${jobId}/local-render-bundle.zip`;
@@ -275,6 +277,65 @@ export function createJobsRouter(config) {
       await ref.update(updatePayload);
 
       res.json({ ok: true, field, bytes: body.length });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.delete("/:jobId/media/:field", async (req, res, next) => {
+    try {
+      const { jobId, field } = req.params;
+      if (!CLEARABLE_MEDIA_FIELDS.has(field)) {
+        return res.status(400).json({ error: `Invalid media field: ${field}` });
+      }
+
+      const ref = getJobsCollection().doc(jobId);
+      const snap = await ref.get();
+      if (!snap.exists) {
+        return res.status(404).json({ error: "Job not found." });
+      }
+      const job = snap.data();
+      assertJobAccess(req, job);
+
+      const mediaPath = job.uploadPaths?.[field];
+      if (mediaPath) {
+        await deleteObject(config, mediaPath);
+      }
+      if (field === "background" && job.uploadPaths?.preprocessedBackground) {
+        await deleteObject(config, job.uploadPaths.preprocessedBackground);
+      }
+
+      let updatedProject = null;
+      try {
+        updatedProject = await loadProjectDoc(config, job);
+        if (updatedProject && typeof updatedProject === "object") {
+          const media =
+            updatedProject.media && typeof updatedProject.media === "object"
+              ? { ...updatedProject.media }
+              : {};
+          media[field] = null;
+          updatedProject.media = media;
+          await writeProjectJson(config, jobId, updatedProject);
+        }
+      } catch (projectErr) {
+        console.warn("[api] media clear could not rewrite project", jobId, field, projectErr.message);
+      }
+
+      const nextUploadPaths = { ...(job.uploadPaths || {}) };
+      nextUploadPaths[field] = null;
+      if (field === "background") nextUploadPaths.preprocessedBackground = null;
+
+      const nextFileMeta = { ...(job.fileMeta || {}) };
+      nextFileMeta[field] = null;
+
+      await ref.update({
+        uploadPaths: nextUploadPaths,
+        fileMeta: nextFileMeta,
+        ...(updatedProject ? { project: updatedProject } : {}),
+        updatedAt: new Date().toISOString(),
+      });
+
+      res.json({ jobId, field, cleared: true });
     } catch (err) {
       next(err);
     }
