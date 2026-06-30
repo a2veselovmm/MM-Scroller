@@ -456,14 +456,14 @@ export async function renderJob({
     const videoBackgroundPath = isVideoMediaPath(backgroundPath) ? backgroundPath : null;
     if (videoBackgroundPath) {
       backgroundIsVideo = true;
-      const fitMode = settings.fitMode || "cover";
+      const bgFitMode = settings.fitMode || "cover";
       const preparedBg = path.join(workDir, "bg-video-prepared.mp4");
       await prepareBackgroundVideo({
         inputPath: videoBackgroundPath,
         outputPath: preparedBg,
         width: built.ew,
         height: built.eh,
-        fitMode,
+        fitMode: bgFitMode,
         onFfmpegSpawn,
       });
 
@@ -511,7 +511,7 @@ export async function renderJob({
     overlayDurationSec,
     frameWidth,
     frameHeight,
-    fitMode: settings.fitMode || "cover",
+    overlayFitMode: settings.overlayFitMode || settings.fitMode || "cover",
     textStripPath,
     textStripWidth,
     textStripHeight,

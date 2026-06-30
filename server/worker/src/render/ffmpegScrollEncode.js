@@ -303,7 +303,7 @@ export async function encodeScrollSegment({
   overlayDurationSec = 0,
   frameWidth = 0,
   frameHeight = 0,
-  fitMode = "cover",
+  overlayFitMode = "cover",
   textStripPath,
   textStripWidth,
   textStripHeight,
@@ -329,7 +329,7 @@ export async function encodeScrollSegment({
     overlayInputIndex: hasOverlay ? 2 : null,
     overlayWidth: frameWidth || textStripWidth,
     overlayHeight: frameHeight || 1920,
-    overlayFitMode: fitMode,
+    overlayFitMode,
   });
 
   const args = ["-y"];
@@ -468,7 +468,7 @@ export async function encodeScrollVideo({
   overlayDurationSec = 0,
   frameWidth = 1080,
   frameHeight = 1920,
-  fitMode = "cover",
+  overlayFitMode = "cover",
   textStripPath,
   textStripWidth,
   textStripHeight,
@@ -498,7 +498,7 @@ export async function encodeScrollVideo({
     overlayInputIndex: hasOverlay ? 2 : null,
     overlayWidth: frameWidth,
     overlayHeight: frameHeight,
-    overlayFitMode: fitMode,
+    overlayFitMode,
   });
 
   const args = ["-y"];

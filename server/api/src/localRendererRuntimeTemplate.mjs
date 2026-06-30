@@ -620,6 +620,8 @@ async function main() {
     text.editMode === "plain"
       ? String(text.plainText || "")
       : stripTags(text.styledHtml || text.plainText || "");
+  const bgFitMode = settings.fitMode || "cover";
+  const overlayFitMode = settings.overlayFitMode || bgFitMode;
 
   const styledMode =
     text.editMode !== "plain" && text.styledHtml && String(text.styledHtml).trim();
@@ -682,7 +684,7 @@ async function main() {
         preparedBg,
         ew,
         eh,
-        settings.fitMode || "cover"
+        bgFitMode
       );
       const playbackMode = resolveBackgroundVideoMode(settings, project.media || {});
       if (playbackMode === "boomerang") {
@@ -777,7 +779,7 @@ async function main() {
     filterParts.push(basePart);
     if (overlayRenderPath) {
       filterParts.push(
-        `[2:v]${buildFitFilter(ew, eh, settings.fitMode || "cover", { transparentPad: true })},format=rgba[ovr]`,
+        `[2:v]${buildFitFilter(ew, eh, overlayFitMode, { transparentPad: true })},format=rgba[ovr]`,
         "[vtxt][ovr]overlay=x=0:y=0:eval=frame:format=auto[vout]"
       );
     } else {

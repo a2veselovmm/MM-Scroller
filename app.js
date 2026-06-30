@@ -80,6 +80,7 @@ const state = {
   /** Canvas Y (px): bottom edge of text at timeline end. */
   scrollLastRow: null,
   fitMode: "cover",
+  overlayFitMode: "cover",
   colorOverlayEnabled: false,
   colorOverlayColor: "#000000",
   colorOverlayOpacity: 40,
@@ -226,6 +227,7 @@ function applyUndoSnapshot(snap) {
 function applyStateToControls() {
   $("aspect-ratio").value = state.aspectRatio;
   $("fit-mode").value = state.fitMode;
+  $("overlay-fit-mode").value = state.overlayFitMode;
   $("bg-video-mode").value = state.bgVideoMode;
 
   $("font-size").value = String(state.fontSize);
@@ -990,15 +992,17 @@ function applyBgEffects() {
 }
 
 function applyBackground() {
-  const fit = state.fitMode;
-  bgImage.dataset.fit = fit;
-  bgImage.style.objectFit = fit === "fill" ? "fill" : fit;
-  bgVideo.dataset.fit = fit;
-  bgVideo.style.objectFit = fit === "fill" ? "fill" : fit;
-  overlayImage.dataset.fit = fit;
-  overlayImage.style.objectFit = fit === "fill" ? "fill" : fit;
-  overlayVideo.dataset.fit = fit;
-  overlayVideo.style.objectFit = fit === "fill" ? "fill" : fit;
+  const bgFit = state.fitMode;
+  bgImage.dataset.fit = bgFit;
+  bgImage.style.objectFit = bgFit === "fill" ? "fill" : bgFit;
+  bgVideo.dataset.fit = bgFit;
+  bgVideo.style.objectFit = bgFit === "fill" ? "fill" : bgFit;
+
+  const overlayFit = state.overlayFitMode || "cover";
+  overlayImage.dataset.fit = overlayFit;
+  overlayImage.style.objectFit = overlayFit === "fill" ? "fill" : overlayFit;
+  overlayVideo.dataset.fit = overlayFit;
+  overlayVideo.style.objectFit = overlayFit === "fill" ? "fill" : overlayFit;
 
   applyBgEffects();
   engine.applyTime(engine.timelineTime);
@@ -1512,6 +1516,12 @@ function initControls() {
     state.fitMode = e.target.value;
     applyBackground();
     refreshBackgroundRaster();
+  });
+
+  $("overlay-fit-mode").addEventListener("change", (e) => {
+    if (!undoManager.isRestoring()) pushUndo();
+    state.overlayFitMode = e.target.value;
+    applyBackground();
   });
 
   $("bg-video-mode").addEventListener("change", (e) => {
