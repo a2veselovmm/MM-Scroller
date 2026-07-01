@@ -23,7 +23,6 @@ import { applyPreviewLayout } from "./previewLayout.js";
 import { LIMITS } from "./server/shared/constants.js";
 import { ScrollPreview } from "./preview.js";
 import { applyBgEffectsToDom } from "./backgroundEffects.js";
-import { exportRecording, downloadBlob } from "./export.js";
 import {
   buildProjectDocument,
   downloadProjectJson,
@@ -150,7 +149,6 @@ const engine = new ScrollPreview(canvas, textEl, textContainer);
 let bgObjectUrl = null;
 /** Full-resolution upload; kept for re-rasterize on aspect/fit change. */
 let bgSourceUrl = null;
-let isExporting = false;
 let isCloudUploading = false;
 let isImporting = false;
 let isScrubbing = false;
@@ -345,7 +343,6 @@ function updatePlayPauseButton() {
 }
 
 function togglePlayPause() {
-  if (isExporting) return;
   if (engine.running && !engine.paused) {
     engine.pause();
     pauseTimelineAudio();
@@ -1058,7 +1055,6 @@ function clearBackground({ invalidatePending = true } = {}) {
   syncBgBoomerangWarning();
   bgPlaceholder.classList.remove("hidden");
   $("bg-filename").textContent = "No file — gradient placeholder";
-  syncExportChoiceHints();
   syncMediaClearButtons();
   applyBackground();
   requestAnimationFrame(() => remeasureAndApply());
@@ -1070,7 +1066,6 @@ async function applyBackgroundDisplayUrl(displayUrl) {
   bgImage.src = displayUrl;
   bgImage.classList.remove("hidden");
   bgPlaceholder.classList.add("hidden");
-  syncExportChoiceHints();
   syncMediaClearButtons();
   requestAnimationFrame(() => remeasureAndApply());
   applyBackground();
@@ -1094,7 +1089,6 @@ async function applyBackgroundVideoUrl(displayUrl) {
   bgPlaceholder.classList.add("hidden");
   resetBgVideoSeekState();
   syncBgBoomerangWarning();
-  syncExportChoiceHints();
   syncMediaClearButtons();
 
   await new Promise((resolve, reject) => {
@@ -1215,7 +1209,6 @@ function clearOverlay({ invalidatePending = true } = {}) {
   overlayVideo.removeAttribute("src");
   overlayVideo.load();
   $("overlay-filename").textContent = "No file — overlay disabled";
-  syncExportChoiceHints();
   syncMediaClearButtons();
   applyBackground();
   requestAnimationFrame(() => remeasureAndApply());
@@ -1232,7 +1225,6 @@ async function applyOverlayImageUrl(displayUrl) {
   overlayVideo.load();
   overlayImage.src = displayUrl;
   overlayImage.classList.remove("hidden");
-  syncExportChoiceHints();
   syncMediaClearButtons();
   requestAnimationFrame(() => remeasureAndApply());
   applyBackground();
@@ -1245,7 +1237,6 @@ async function applyOverlayVideoUrl(displayUrl) {
   overlayImage.classList.add("hidden");
   overlayImage.removeAttribute("src");
   overlayVideo.classList.remove("hidden");
-  syncExportChoiceHints();
   syncMediaClearButtons();
 
   await new Promise((resolve, reject) => {
@@ -1777,7 +1768,6 @@ function initPanelResize() {
 
 function initTimeline() {
   timelineScrub.addEventListener("pointerdown", () => {
-    if (isExporting) return;
     isScrubbing = true;
     if (engine.running) engine.pause();
     pauseTimelineAudio();
@@ -1785,7 +1775,6 @@ function initTimeline() {
   });
 
   timelineScrub.addEventListener("input", () => {
-    if (isExporting) return;
     const t = parseInt(timelineScrub.value, 10) / 10;
     engine.seek(t);
     syncTimelineAudio(t);
@@ -1825,85 +1814,6 @@ function initTransport() {
     updatePlayPauseButton();
   });
 
-}
-
-async function runExport() {
-  if (isExporting) return;
-  isExporting = true;
-  const exportBtn = $("btn-export");
-  const progressEl = $("export-progress");
-  const progressFill = $("export-progress-fill");
-  const progressLabel = $("export-progress-label");
-
-  exportBtn.disabled = true;
-  btnPlayPause.disabled = true;
-  $("btn-export-setup").disabled = true;
-  $("btn-import-setup").disabled = true;
-  timelineScrub.disabled = true;
-  progressEl.classList.remove("hidden");
-  canvas.classList.add("is-recording");
-
-  const savedOnTimeUpdate = engine.onTimeUpdate;
-  engine.onTimeUpdate = () => {};
-
-  try {
-    syncFromEditor();
-    engine.stop();
-    pauseTimelineAudio();
-    engine.speed = state.scrollSpeed;
-    engine.startDelay = state.startDelay;
-    engine.scrollFirstRow = state.scrollFirstRow;
-    engine.scrollLastRow = state.scrollLastRow;
-    if (document.fonts?.ready) {
-      await document.fonts.ready;
-    }
-    updateScrollPositionControls();
-    engine.reset();
-
-    progressLabel.textContent = "Preparing export…";
-
-    const blob = await exportRecording(canvas, engine, {
-      bgVideoEl: state.hasBackgroundImage && state.bgMediaType === "video" ? bgVideo : null,
-      bgVideoMode: state.bgVideoMode,
-      bgVideoDuration: state.bgVideoDuration || bgVideo.duration || 0,
-      overlayVideoEl: state.hasOverlayMedia && state.overlayMediaType === "video" ? overlayVideo : null,
-      overlayVideoDuration: state.overlayVideoDuration || overlayVideo.duration || 0,
-      musicEl: bgMusic.src ? bgMusic : null,
-      voiceEl: bgVoice.src ? bgVoice : null,
-      musicVolume: state.musicVolume,
-      musicLoop: state.musicLoop,
-      voiceVolume: state.voiceVolume,
-      onFrame: async (t) => {
-        syncTimelineAudio(t);
-      },
-      onProgress: (pct) => {
-        progressFill.style.width = `${pct}%`;
-      },
-      onStatus: (msg) => {
-        progressLabel.textContent = msg;
-      },
-    });
-
-    downloadBlob(blob, "scrolldrop-export.mp4");
-    progressLabel.textContent = "Export complete — download started";
-    playbackStatus.textContent = "Export complete";
-    pauseTimelineAudio();
-  } catch (err) {
-    console.error(err);
-    progressLabel.textContent = `Export failed: ${err.message}`;
-    playbackStatus.textContent = "Export failed";
-    alert(`Export failed: ${err.message}`);
-  } finally {
-    engine.onTimeUpdate = savedOnTimeUpdate;
-    isExporting = false;
-    exportBtn.disabled = false;
-    btnPlayPause.disabled = false;
-    $("btn-export-setup").disabled = false;
-    $("btn-import-setup").disabled = false;
-    timelineScrub.disabled = false;
-    canvas.classList.remove("is-recording");
-    setTimeout(() => progressEl.classList.add("hidden"), 3000);
-  }
 }
 
 function serializeSettings() {
@@ -2441,7 +2351,7 @@ function appendReEditButton(actions, job) {
 }
 
 async function reEditJobFromQueue(jobId, triggerBtn) {
-  if (isExporting || isCloudUploading) {
+  if (isCloudUploading) {
     alert("Wait until the current export finishes.");
     return;
   }
@@ -2541,31 +2451,18 @@ function initRenderQueue() {
 function openExportChoiceDialog() {
   const dialog = $("export-choice-dialog");
   if (!dialog?.showModal) {
-    runExport();
+    openRenderNameDialog("cloud");
     return;
   }
-  syncExportChoiceHints();
   dialog.showModal();
 }
 
 async function handleExportChoice(ev) {
   ev?.preventDefault();
   const dialog = $("export-choice-dialog");
-  const selected = dialog?.querySelector('input[name="export-target"]:checked')?.value || "browser";
+  const selected = dialog?.querySelector('input[name="export-target"]:checked')?.value || "cloud";
   dialog?.close();
-  if (selected === "cloud" || selected === "local_script") {
-    openRenderNameDialog(selected);
-    return;
-  }
-  await runExport();
-}
-
-function syncExportChoiceHints() {
-  const warning = $("export-choice-browser-video-warning");
-  if (!warning) return;
-  const hasVideoBackground = state.hasBackgroundImage && state.bgMediaType === "video";
-  const hasVideoOverlay = state.hasOverlayMedia && state.overlayMediaType === "video";
-  warning.classList.toggle("hidden", !(hasVideoBackground || hasVideoOverlay));
+  openRenderNameDialog(selected === "local_script" ? "local_script" : "cloud");
 }
 
 const STATE_MEDIA_KEYS = new Set([
@@ -2779,7 +2676,7 @@ async function applyProjectDocument(doc) {
 }
 
 async function importSetupJson(file) {
-  if (!file || isExporting) return;
+  if (!file || isCloudUploading) return;
 
   const text = await file.text();
   const doc = parseProjectDocument(text);
@@ -2810,7 +2707,7 @@ async function importSetupJson(file) {
 }
 
 async function exportSetupJson(options = {}) {
-  if (isExporting) return;
+  if (isCloudUploading) return;
 
   const {
     embedMedia = true,
@@ -2859,7 +2756,6 @@ async function exportSetupJson(options = {}) {
 
 function initExport() {
   $("btn-export").addEventListener("click", openExportChoiceDialog);
-  syncExportChoiceHints();
 
   const dialog = $("export-choice-dialog");
   dialog?.querySelector("form")?.addEventListener("submit", handleExportChoice);

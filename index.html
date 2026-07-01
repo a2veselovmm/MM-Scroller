@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MM-Scroller — Scrolling Text Over Any Background</title>
-  <meta name="description" content="Place animated scrolling text over a still image with music and voiceover. Export as MP4 — no install, no server." />
+  <meta name="description" content="Place animated scrolling text over image or video backgrounds with music and voiceover. Render via cloud queue or downloadable local script." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -435,7 +435,7 @@
       <div id="export-progress" class="export-progress hidden" role="status" aria-live="polite">
         <div class="export-progress-bar"><div id="export-progress-fill"></div></div>
         <span id="export-progress-label">Exporting…</span>
-        <p id="export-progress-hint" class="export-progress-hint">Keep this tab open until export finishes.</p>
+        <p id="export-progress-hint" class="export-progress-hint">Track progress in the queue panel (header → Queue).</p>
       </div>
     </div>
 
@@ -478,20 +478,10 @@
   <dialog id="export-choice-dialog" class="export-choice-dialog">
     <form method="dialog" class="export-choice-form">
       <h2>Export MP4</h2>
-      <p class="export-choice-lead">Choose where to render your video (1080p, 30 fps).</p>
+      <p class="export-choice-lead">Choose where to queue your render (1080p, 30 fps).</p>
       <fieldset class="export-choice-options">
         <label class="export-choice-option">
-          <input type="radio" name="export-target" value="browser" checked />
-          <span>
-            <strong>Render in this tab</strong>
-            <small>Uses your browser. Best for short 1-2 min scrollers.</small>
-            <small id="export-choice-browser-video-warning" class="export-choice-warning hidden">
-              Video background/overlay detected: browser render may take extremely long and can fail on some machines.
-            </small>
-          </span>
-        </label>
-        <label class="export-choice-option">
-          <input type="radio" name="export-target" value="cloud" />
+          <input type="radio" name="export-target" value="cloud" checked />
           <span>
             <strong>Send to cloud queue</strong>
             <small>Uploads project to GCP. Best for batches and remote rendering.</small>

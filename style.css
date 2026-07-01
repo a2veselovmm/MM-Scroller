@@ -968,27 +968,6 @@ input[type="color"] {
   opacity: 0.9;
 }
 
-/* Recording indicator */
-.preview-canvas.is-recording {
-  outline: 2px solid var(--danger);
-  outline-offset: 2px;
-}
-
-.preview-canvas.is-recording::after {
-  content: "REC";
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 10;
-  background: var(--danger);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 4px 8px;
-  border-radius: 4px;
-  letter-spacing: 0.05em;
-}
-
 /* Export choice dialog */
 .export-choice-dialog {
   border: 1px solid var(--border);
@@ -1059,12 +1038,6 @@ input[type="color"] {
   font-size: 12px;
   color: var(--text-muted);
   line-height: 1.35;
-}
-
-.export-choice-warning {
-  margin-top: 6px;
-  color: #f59e0b !important;
-  font-weight: 600;
 }
 
 .export-choice-actions {

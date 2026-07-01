@@ -1,6 +1,6 @@
 # MM-Scroller
 
-Browser-based tool to place animated scrolling text over an image or video background, with music and voiceover. Supports browser export, GCP cloud queue rendering, and downloadable local render bundles.
+Browser-based editor to place animated scrolling text over an image or video background, with music and voiceover. Supports GCP cloud queue rendering and downloadable local render bundles.
 
 ## Features
 
@@ -17,7 +17,7 @@ Browser-based tool to place animated scrolling text over an image or video backg
 - Background fit (cover / contain / stretch), color overlay & vignette
 - Aspect ratios: 16:9, 9:16, 1:1, 4:3
 - Live preview with play / pause / reset
-- Export to **MP4** via offline frame render + ffmpeg.wasm (stable 30 fps)
+- Queue render to **MP4** via cloud workers or local script bundle
 - **Export setup (JSON)** in Settings — all controls, text, and optional embedded media
 
 ## Local development
@@ -34,17 +34,12 @@ Open `http://localhost:8080` (or the port shown). ES modules require HTTP — `f
 
 ## Render options
 
-### 1) Render in this tab (browser export)
-
-- Best for short videos and quick iterations
-- Uses ffmpeg.wasm in the browser
-
-### 2) Send to cloud queue (GCP)
+### 1) Send to cloud queue (GCP)
 
 - Uploads project + media and renders on Cloud Run workers
 - Best for longer renders and when you want background processing
 
-### 3) Download render script (local bundle)
+### 2) Download render script (local bundle)
 
 - Creates a ZIP bundle with project JSON, media, required fonts, renderer runtime, and OS scripts
 - Best when you want to use your own machine resources for rendering
@@ -83,8 +78,6 @@ Cloud queue requires both Cloud Run services and Hosting rewrite to `/api/**`.
 ├── style.css     # UI styles
 ├── app.js        # Controls & state
 ├── preview.js    # rAF scroll engine
-├── export.js           # Frame capture + export orchestration
-├── frameEncoder.js     # ffmpeg.wasm frame sequence → WebM/MP4
 ├── projectIO.js        # Save project JSON
 ├── audioSync.js        # Preview audio routing
 ├── backgroundMedia.js  # Audio timeline helpers
@@ -93,9 +86,7 @@ Cloud queue requires both Cloud Run services and Hosting rewrite to `/api/**`.
 
 ## Browser notes
 
-- Best export experience: **Chrome** or **Edge**
-- MP4 export downloads ffmpeg.wasm on first use (~25 MB); needs COOP/COEP headers (configured in `firebase.json`)
-- Export renders each frame at a fixed timeline position, then encodes at 30 fps
+- Best editing/preview experience: **Chrome** or **Edge**
 - Boomerang background preview in-browser is limited to around 10 FPS due to browser seek constraints
 
 ## License
