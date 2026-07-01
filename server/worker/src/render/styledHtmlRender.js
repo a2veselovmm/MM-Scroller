@@ -2,7 +2,8 @@ import { createCanvas, loadImage } from "canvas";
 import { resolveFontFamily } from "../fonts/localFonts.js";
 import { hexToRgba, normalizeOpacity } from "./renderUtils.js";
 
-const TWEMOJI_BASE_URL = "https://cdn.jsdelivr.net/gh/jdecked/twemoji@latest/assets/72x72";
+const TWEMOJI_BASE_URL = "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72";
+const CSS_COLOR_RE = /(rgba?\([^)]+\)|hsla?\([^)]+\)|#[0-9a-f]{3,8}\b)/i;
 const emojiSegmenter =
   typeof Intl !== "undefined" && Intl.Segmenter
     ? new Intl.Segmenter("en", { granularity: "grapheme" })
@@ -154,18 +155,12 @@ function parseTextShadow(value) {
   if (!value || value === "none") return null;
   const first = String(value).split(/,(?![^()]*\))/)[0]?.trim();
   if (!first) return null;
-  const tokens = first.split(/\s+/).filter(Boolean);
-  let color = null;
-  const lengths = [];
-  for (const token of tokens) {
-    if (/^(rgba?\(|hsla?\(|#)/i.test(token)) {
-      color = token;
-      continue;
-    }
-    if (/^-?\d+(?:\.\d+)?(?:px)?$/i.test(token)) {
-      lengths.push(parseFloat(token));
-    }
-  }
+  const colorMatch = first.match(CSS_COLOR_RE);
+  const color = colorMatch ? colorMatch[1] : null;
+  const numericPart = color ? first.replace(color, " ") : first;
+  const lengths = (numericPart.match(/-?\d+(?:\.\d+)?(?:px)?/gi) || [])
+    .map((token) => parseFloat(token))
+    .filter((n) => Number.isFinite(n));
   if (!color && !lengths.length) return null;
   return {
     color: color || "rgba(0,0,0,0.85)",
@@ -215,13 +210,16 @@ function parseStroke(css, settings = {}) {
     ) || 0
   );
 
-  let strokeColor = String(rawColor || "").trim();
-  if (!strokeColor) {
-    const colorMatch = String(raw).match(/(rgba?\([^)]+\)|hsla?\([^)]+\)|#[0-9a-f]{3,8}|[a-z]+)/i);
-    strokeColor = colorMatch ? colorMatch[1] : "";
+  let strokeColor = "";
+  const rawColorMatch = String(rawColor || "").match(CSS_COLOR_RE);
+  if (rawColorMatch) {
+    strokeColor = rawColorMatch[1];
+  } else {
+    const rawMatch = String(raw || "").match(CSS_COLOR_RE);
+    strokeColor = rawMatch ? rawMatch[1] : "";
   }
   if (!strokeColor || strokeColor === "initial" || strokeColor === "unset" || strokeColor === "none") {
-    strokeColor = "#000000";
+    strokeColor = settings.strokeColor || "#000000";
   }
   return { strokeWidth, strokeColor };
 }

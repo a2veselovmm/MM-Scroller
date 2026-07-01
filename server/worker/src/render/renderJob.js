@@ -37,7 +37,7 @@ function stripHtml(html) {
     .trim();
 }
 
-const TWEMOJI_BASE_URL = "https://cdn.jsdelivr.net/gh/jdecked/twemoji@latest/assets/72x72";
+const TWEMOJI_BASE_URL = "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72";
 const emojiSegmenter =
   typeof Intl !== "undefined" && Intl.Segmenter
     ? new Intl.Segmenter("en", { granularity: "grapheme" })
