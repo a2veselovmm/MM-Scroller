@@ -244,7 +244,9 @@ function appendTextStripInputs(args, {
       "-f",
       "rawvideo",
       "-pix_fmt",
-      "rgba",
+      // node-canvas toBuffer("raw") emits BGRA bytes on little-endian hosts.
+      // Using rgba here swaps red/blue in rendered text and emoji.
+      "bgra",
       "-s",
       `${textStripWidth}x${textStripHeight}`,
       "-framerate",
