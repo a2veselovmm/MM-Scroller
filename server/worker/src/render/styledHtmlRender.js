@@ -41,13 +41,26 @@ function parseFontFamily(value, fallback) {
 
 function parseTextShadow(value) {
   if (!value || value === "none") return null;
-  const m = String(value).match(/(rgba?\([^)]+\)|#[0-9a-f]+)\s+(-?\d+(?:\.\d+)?px)\s+(-?\d+(?:\.\d+)?px)(?:\s+(-?\d+(?:\.\d+)?px))?/i);
-  if (!m) return null;
+  const first = String(value).split(/,(?![^()]*\))/)[0]?.trim();
+  if (!first) return null;
+  const tokens = first.split(/\s+/).filter(Boolean);
+  let color = null;
+  const lengths = [];
+  for (const token of tokens) {
+    if (/^(rgba?\(|hsla?\(|#)/i.test(token)) {
+      color = token;
+      continue;
+    }
+    if (/^-?\d+(?:\.\d+)?(?:px)?$/i.test(token)) {
+      lengths.push(parseFloat(token));
+    }
+  }
+  if (!color && !lengths.length) return null;
   return {
-    color: m[1],
-    ox: parseFloat(m[2]) || 0,
-    oy: parseFloat(m[3]) || 0,
-    blur: parseFloat(m[4]) || 0,
+    color: color || "rgba(0,0,0,0.85)",
+    ox: Number.isFinite(lengths[0]) ? lengths[0] : 0,
+    oy: Number.isFinite(lengths[1]) ? lengths[1] : 0,
+    blur: Number.isFinite(lengths[2]) ? lengths[2] : 0,
   };
 }
 
@@ -55,18 +68,68 @@ function mergeStyles(base, extra) {
   return { ...base, ...extra };
 }
 
-function parseStroke(css) {
-  const raw = css["-webkit-text-stroke"];
-  if (!raw) return { strokeWidth: 0, strokeColor: "#000000" };
-  const px = String(raw).match(/([\d.]+)px/);
-  const strokeWidth = px ? parseFloat(px[1]) : 0;
-  const strokeColor = String(raw).replace(/^[\d.]+px\s*/, "").trim() || "#000000";
+function parseStroke(css, settings = {}) {
+  const raw =
+    css["-webkit-text-stroke"] ||
+    css["webkit-text-stroke"] ||
+    css["webkittextstroke"] ||
+    "";
+  const rawWidth =
+    css["-webkit-text-stroke-width"] ||
+    css["webkit-text-stroke-width"] ||
+    css["webkittextstrokewidth"] ||
+    "";
+  const rawColor =
+    css["-webkit-text-stroke-color"] ||
+    css["webkit-text-stroke-color"] ||
+    css["webkittextstrokecolor"] ||
+    "";
+
+  if (!raw && !rawWidth && !rawColor) {
+    if (!settings.strokeEnabled) return { strokeWidth: 0, strokeColor: "#000000" };
+    return {
+      strokeWidth: Math.max(0, Number(settings.strokeWidth) || 0),
+      strokeColor: hexToRgba(settings.strokeColor || "#000000", normalizeOpacity(settings.strokeOpacity, 1)),
+    };
+  }
+
+  const widthFromRaw = String(raw).match(/-?\d+(?:\.\d+)?px/i);
+  const widthFromLonghand = String(rawWidth).match(/-?\d+(?:\.\d+)?/i);
+  const strokeWidth = Math.max(
+    0,
+    Number(
+      widthFromLonghand?.[0] ??
+        widthFromRaw?.[0]?.replace(/px$/i, "") ??
+        0
+    ) || 0
+  );
+
+  let strokeColor = String(rawColor || "").trim();
+  if (!strokeColor) {
+    const colorMatch = String(raw).match(/(rgba?\([^)]+\)|hsla?\([^)]+\)|#[0-9a-f]{3,8}|[a-z]+)/i);
+    strokeColor = colorMatch ? colorMatch[1] : "";
+  }
+  if (!strokeColor || strokeColor === "initial" || strokeColor === "unset" || strokeColor === "none") {
+    strokeColor = "#000000";
+  }
   return { strokeWidth, strokeColor };
+}
+
+function defaultShadowFromSettings(settings = {}) {
+  if (!settings.shadowEnabled) return null;
+  return {
+    color: hexToRgba(settings.shadowColor || "#000000", normalizeOpacity(settings.shadowOpacity, 0.85)),
+    ox: 0,
+    oy: 2,
+    blur: Math.max(0, Number(settings.shadowSoftness) || 0),
+  };
 }
 
 function styleFromCss(css, settings) {
   const fontSize = parsePx(css["font-size"], settings.fontSize ?? 48);
-  const stroke = parseStroke(css);
+  const stroke = parseStroke(css, settings);
+  const rawShadow = String(css["text-shadow"] || "").trim();
+  const shadow = rawShadow ? parseTextShadow(rawShadow) : defaultShadowFromSettings(settings);
   return {
     color: css.color || settings.fontColor || "#ffffff",
     fontSize,
@@ -76,7 +139,7 @@ function styleFromCss(css, settings) {
     opacity: css.opacity != null ? normalizeOpacity(css.opacity, 1) : normalizeOpacity(settings.fontOpacity, 1),
     strokeWidth: stroke.strokeWidth,
     strokeColor: stroke.strokeColor,
-    shadow: parseTextShadow(css["text-shadow"]),
+    shadow,
     lineHeight: settings.lineHeight ?? 1.35,
   };
 }

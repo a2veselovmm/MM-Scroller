@@ -133,6 +133,15 @@ async function buildTextStrip({ text, settings, ew, drawScale, paddingH, align }
   const fontOpacity = normalizeOpacity(settings.fontOpacity, 1);
   const fontWeight = settings.bold ? "700" : "400";
   const fontStyle = settings.italic ? "italic" : "normal";
+  const strokeWidth = settings.strokeEnabled ? Math.max(0, Number(settings.strokeWidth) || 0) : 0;
+  const strokeColor = settings.strokeColor || "#000000";
+  const strokeOpacity = normalizeOpacity(settings.strokeOpacity, 1);
+  const shadowEnabled = !!settings.shadowEnabled;
+  const shadowBlur = shadowEnabled ? Math.max(0, Number(settings.shadowSoftness) || 0) : 0;
+  const shadowColor = settings.shadowColor || "#000000";
+  const shadowOpacity = normalizeOpacity(settings.shadowOpacity, 0.85);
+  const shadowOffsetX = 0;
+  const shadowOffsetY = 2;
 
   const measureCanvas = createCanvas(ew, 10);
   const mctx = measureCanvas.getContext("2d");
@@ -141,14 +150,25 @@ async function buildTextStrip({ text, settings, ew, drawScale, paddingH, align }
   const lineHeightPx = fontSize * lineHeight * drawScale;
   const { lines, height: textHeight } = measureTextBlock(mctx, plain, maxTextWidth, lineHeightPx);
 
-  const textCanvas = createCanvas(ew, Math.ceil(textHeight) + 20);
+  const scaledStroke = strokeWidth * drawScale;
+  const strokePad = Math.max(0, scaledStroke / 2);
+  const scaledBlur = shadowBlur * drawScale;
+  const scaledOffsetY = shadowOffsetY * drawScale;
+  const padTop = shadowEnabled
+    ? Math.max(strokePad, scaledBlur - scaledOffsetY + strokePad)
+    : strokePad;
+  const padBottom = shadowEnabled
+    ? Math.max(strokePad, scaledBlur + scaledOffsetY + strokePad)
+    : strokePad;
+  const textOffsetY = padTop > 0 ? Math.ceil(padTop + 2) : 0;
+  const padBottomPx = padBottom > 0 ? Math.ceil(padBottom + 2) : 0;
+
+  const textCanvas = createCanvas(ew, Math.ceil(textHeight) + 20 + textOffsetY + padBottomPx);
   const tctx = textCanvas.getContext("2d");
   tctx.font = mctx.font;
-  tctx.fillStyle = settings.fontColor || "#ffffff";
-  tctx.globalAlpha = fontOpacity;
   tctx.textBaseline = "top";
 
-  let y = 0;
+  let y = textOffsetY;
   for (const line of lines) {
     let x = paddingH * drawScale;
     if (align === "center") {
@@ -160,11 +180,30 @@ async function buildTextStrip({ text, settings, ew, drawScale, paddingH, align }
     } else {
       tctx.textAlign = "left";
     }
+    tctx.globalAlpha = fontOpacity;
+    if (shadowEnabled) {
+      tctx.shadowColor = hexToRgba(shadowColor, shadowOpacity);
+      tctx.shadowBlur = scaledBlur;
+      tctx.shadowOffsetX = shadowOffsetX * drawScale;
+      tctx.shadowOffsetY = scaledOffsetY;
+    } else {
+      tctx.shadowColor = "rgba(0,0,0,0)";
+      tctx.shadowBlur = 0;
+      tctx.shadowOffsetX = 0;
+      tctx.shadowOffsetY = 0;
+    }
+    if (scaledStroke > 0) {
+      tctx.lineWidth = scaledStroke;
+      tctx.strokeStyle = hexToRgba(strokeColor, strokeOpacity);
+      tctx.lineJoin = "round";
+      tctx.strokeText(line, x, y);
+    }
+    tctx.fillStyle = settings.fontColor || "#ffffff";
     tctx.fillText(line, x, y);
     y += lineHeightPx;
   }
 
-  return { textCanvas, textHeight: Math.ceil(textHeight) + 20, textOffsetY: 0 };
+  return { textCanvas, textHeight: Math.ceil(textHeight) + 20, textOffsetY };
 }
 
 async function buildCanvasAssets({

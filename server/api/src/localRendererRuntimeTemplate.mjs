@@ -174,25 +174,84 @@ function parseFontFamily(value, fallback) {
 
 function parseTextShadow(value) {
   if (!value || value === "none") return null;
-  const m = String(value).match(
-    /(rgba?\([^)]+\)|#[0-9a-f]+)\s+(-?\d+(?:\.\d+)?px)\s+(-?\d+(?:\.\d+)?px)(?:\s+(-?\d+(?:\.\d+)?px))?/i
-  );
-  if (!m) return null;
+  const first = String(value).split(/,(?![^()]*\))/)[0]?.trim();
+  if (!first) return null;
+  const tokens = first.split(/\s+/).filter(Boolean);
+  let color = null;
+  const lengths = [];
+  for (const token of tokens) {
+    if (/^(rgba?\(|hsla?\(|#)/i.test(token)) {
+      color = token;
+      continue;
+    }
+    if (/^-?\d+(?:\.\d+)?(?:px)?$/i.test(token)) {
+      lengths.push(parseFloat(token));
+    }
+  }
+  if (!color && !lengths.length) return null;
   return {
-    color: m[1],
-    ox: parseFloat(m[2]) || 0,
-    oy: parseFloat(m[3]) || 0,
-    blur: parseFloat(m[4]) || 0,
+    color: color || "rgba(0,0,0,0.85)",
+    ox: Number.isFinite(lengths[0]) ? lengths[0] : 0,
+    oy: Number.isFinite(lengths[1]) ? lengths[1] : 0,
+    blur: Number.isFinite(lengths[2]) ? lengths[2] : 0,
   };
 }
 
-function parseStroke(css) {
-  const raw = css["-webkit-text-stroke"];
-  if (!raw) return { strokeWidth: 0, strokeColor: "#000000" };
-  const px = String(raw).match(/([\d.]+)px/);
-  const strokeWidth = px ? parseFloat(px[1]) : 0;
-  const strokeColor = String(raw).replace(/^[\d.]+px\s*/, "").trim() || "#000000";
+function parseStroke(css, settings = {}) {
+  const raw =
+    css["-webkit-text-stroke"] ||
+    css["webkit-text-stroke"] ||
+    css["webkittextstroke"] ||
+    "";
+  const rawWidth =
+    css["-webkit-text-stroke-width"] ||
+    css["webkit-text-stroke-width"] ||
+    css["webkittextstrokewidth"] ||
+    "";
+  const rawColor =
+    css["-webkit-text-stroke-color"] ||
+    css["webkit-text-stroke-color"] ||
+    css["webkittextstrokecolor"] ||
+    "";
+
+  if (!raw && !rawWidth && !rawColor) {
+    if (!settings.strokeEnabled) return { strokeWidth: 0, strokeColor: "#000000" };
+    return {
+      strokeWidth: Math.max(0, Number(settings.strokeWidth) || 0),
+      strokeColor: hexToRgba(settings.strokeColor || "#000000", normalizeOpacity(settings.strokeOpacity, 1)),
+    };
+  }
+
+  const widthFromRaw = String(raw).match(/-?\d+(?:\.\d+)?px/i);
+  const widthFromLonghand = String(rawWidth).match(/-?\d+(?:\.\d+)?/i);
+  const strokeWidth = Math.max(
+    0,
+    Number(
+      widthFromLonghand?.[0] ??
+        widthFromRaw?.[0]?.replace(/px$/i, "") ??
+        0
+    ) || 0
+  );
+
+  let strokeColor = String(rawColor || "").trim();
+  if (!strokeColor) {
+    const colorMatch = String(raw).match(/(rgba?\([^)]+\)|hsla?\([^)]+\)|#[0-9a-f]{3,8}|[a-z]+)/i);
+    strokeColor = colorMatch ? colorMatch[1] : "";
+  }
+  if (!strokeColor || strokeColor === "initial" || strokeColor === "unset" || strokeColor === "none") {
+    strokeColor = "#000000";
+  }
   return { strokeWidth, strokeColor };
+}
+
+function defaultShadowFromSettings(settings = {}) {
+  if (!settings.shadowEnabled) return null;
+  return {
+    color: hexToRgba(settings.shadowColor || "#000000", normalizeOpacity(settings.shadowOpacity, 0.85)),
+    ox: 0,
+    oy: 2,
+    blur: Math.max(0, Number(settings.shadowSoftness) || 0),
+  };
 }
 
 function resolveFontFamily(name, registry, fallback = "Inter") {
@@ -206,7 +265,9 @@ function resolveFontFamily(name, registry, fallback = "Inter") {
 
 function styleFromCss(css, settings, registry) {
   const fontSize = parsePx(css["font-size"], settings.fontSize ?? 48);
-  const stroke = parseStroke(css);
+  const stroke = parseStroke(css, settings);
+  const rawShadow = String(css["text-shadow"] || "").trim();
+  const shadow = rawShadow ? parseTextShadow(rawShadow) : defaultShadowFromSettings(settings);
   return {
     color: css.color || settings.fontColor || "#ffffff",
     fontSize,
@@ -223,7 +284,7 @@ function styleFromCss(css, settings, registry) {
         : normalizeOpacity(settings.fontOpacity, 1),
     strokeWidth: stroke.strokeWidth,
     strokeColor: stroke.strokeColor,
-    shadow: parseTextShadow(css["text-shadow"]),
+    shadow,
     lineHeight: settings.lineHeight ?? 1.35,
   };
 }
@@ -464,6 +525,15 @@ function buildPlainTextCanvas({ plainText, settings, ew, drawScale, paddingH, al
   const fontWeight = settings.bold ? "700" : "400";
   const fontStyle = settings.italic ? "italic" : "normal";
   const opacity = normalizeOpacity(settings.fontOpacity, 1);
+  const strokeWidth = settings.strokeEnabled ? Math.max(0, Number(settings.strokeWidth) || 0) : 0;
+  const strokeColor = settings.strokeColor || "#000000";
+  const strokeOpacity = normalizeOpacity(settings.strokeOpacity, 1);
+  const shadowEnabled = !!settings.shadowEnabled;
+  const shadowBlur = shadowEnabled ? Math.max(0, Number(settings.shadowSoftness) || 0) : 0;
+  const shadowColor = settings.shadowColor || "#000000";
+  const shadowOpacity = normalizeOpacity(settings.shadowOpacity, 0.85);
+  const shadowOffsetX = 0;
+  const shadowOffsetY = 2;
   const measureCanvas = createCanvas(ew, 10);
   const mctx = measureCanvas.getContext("2d");
   mctx.font = `${fontStyle} ${fontWeight} ${fontSize * drawScale}px ${family}`;
@@ -471,14 +541,24 @@ function buildPlainTextCanvas({ plainText, settings, ew, drawScale, paddingH, al
   const lineHeightPx = fontSize * lineHeight * drawScale;
   const lines = wrapPlainLines(mctx, plainText, maxTextWidth);
   const textHeight = lines.length * lineHeightPx + 20;
-  const textCanvas = createCanvas(ew, Math.max(2, Math.ceil(textHeight)));
+  const scaledStroke = strokeWidth * drawScale;
+  const strokePad = Math.max(0, scaledStroke / 2);
+  const scaledBlur = shadowBlur * drawScale;
+  const scaledOffsetY = shadowOffsetY * drawScale;
+  const padTop = shadowEnabled
+    ? Math.max(strokePad, scaledBlur - scaledOffsetY + strokePad)
+    : strokePad;
+  const padBottom = shadowEnabled
+    ? Math.max(strokePad, scaledBlur + scaledOffsetY + strokePad)
+    : strokePad;
+  const textOffsetY = padTop > 0 ? Math.ceil(padTop + 2) : 0;
+  const padBottomPx = padBottom > 0 ? Math.ceil(padBottom + 2) : 0;
+  const textCanvas = createCanvas(ew, Math.max(2, Math.ceil(textHeight + textOffsetY + padBottomPx)));
   const tctx = textCanvas.getContext("2d");
   tctx.font = mctx.font;
-  tctx.fillStyle = settings.fontColor || "#ffffff";
-  tctx.globalAlpha = opacity;
   tctx.textBaseline = "top";
 
-  let y = 0;
+  let y = textOffsetY;
   for (const line of lines) {
     let x = paddingH * drawScale;
     if (align === "center") {
@@ -490,11 +570,30 @@ function buildPlainTextCanvas({ plainText, settings, ew, drawScale, paddingH, al
     } else {
       tctx.textAlign = "left";
     }
+    tctx.globalAlpha = opacity;
+    if (shadowEnabled) {
+      tctx.shadowColor = hexToRgba(shadowColor, shadowOpacity);
+      tctx.shadowBlur = scaledBlur;
+      tctx.shadowOffsetX = shadowOffsetX * drawScale;
+      tctx.shadowOffsetY = scaledOffsetY;
+    } else {
+      tctx.shadowColor = "rgba(0,0,0,0)";
+      tctx.shadowBlur = 0;
+      tctx.shadowOffsetX = 0;
+      tctx.shadowOffsetY = 0;
+    }
+    if (scaledStroke > 0) {
+      tctx.lineWidth = scaledStroke;
+      tctx.strokeStyle = hexToRgba(strokeColor, strokeOpacity);
+      tctx.lineJoin = "round";
+      tctx.strokeText(line, x, y);
+    }
+    tctx.fillStyle = settings.fontColor || "#ffffff";
     tctx.fillText(line, x, y);
     y += lineHeightPx;
   }
 
-  return { textCanvas, textHeight: Math.ceil(textHeight), textOffsetY: 0 };
+  return { textCanvas, textHeight: Math.ceil(textHeight), textOffsetY };
 }
 
 function drawImageCover(ctx, img, w, h) {
