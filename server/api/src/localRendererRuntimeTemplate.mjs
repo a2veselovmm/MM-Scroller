@@ -34,7 +34,10 @@ function hexToRgba(hex, alpha = 1) {
     b = parseInt(clean.slice(4, 6), 16);
   }
   const a = normalizeOpacity(alpha, 1);
-  return `rgba(${r || 255},${g || 255},${b || 255},${a})`;
+  const rr = Number.isFinite(r) ? r : 255;
+  const gg = Number.isFinite(g) ? g : 255;
+  const bb = Number.isFinite(b) ? b : 255;
+  return `rgba(${rr},${gg},${bb},${a})`;
 }
 
 function clampPercent(value, fallback = 55) {
