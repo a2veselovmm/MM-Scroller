@@ -149,6 +149,127 @@ function stripTags(html) {
   return decodeHtml(String(html || "").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, ""));
 }
 
+const TWEMOJI_BASE_URL = "https://cdn.jsdelivr.net/gh/jdecked/twemoji@latest/assets/72x72";
+const emojiSegmenter =
+  typeof Intl !== "undefined" && Intl.Segmenter
+    ? new Intl.Segmenter("en", { granularity: "grapheme" })
+    : null;
+const EMOJI_GRAPHEME_RE = /(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|\uFE0F|\u200D|\u20E3)/u;
+
+function splitGraphemes(text) {
+  const str = String(text || "");
+  if (!str) return [];
+  if (emojiSegmenter) {
+    return Array.from(emojiSegmenter.segment(str), (part) => part.segment);
+  }
+  return Array.from(str);
+}
+
+function isEmojiGrapheme(grapheme) {
+  if (!grapheme) return false;
+  return EMOJI_GRAPHEME_RE.test(grapheme);
+}
+
+function splitEmojiTokens(text) {
+  const tokens = [];
+  let pending = "";
+  for (const grapheme of splitGraphemes(text)) {
+    if (isEmojiGrapheme(grapheme)) {
+      if (pending) {
+        tokens.push({ type: "text", value: pending });
+        pending = "";
+      }
+      tokens.push({ type: "emoji", value: grapheme });
+      continue;
+    }
+    pending += grapheme;
+  }
+  if (pending) tokens.push({ type: "text", value: pending });
+  return tokens;
+}
+
+function emojiToCodepoint(emoji) {
+  const out = [];
+  for (const symbol of splitGraphemes(emoji)) {
+    const cp = symbol.codePointAt(0);
+    if (!Number.isFinite(cp) || cp === 0xfe0f) continue;
+    out.push(cp.toString(16));
+  }
+  return out.join("-");
+}
+
+function emojiImageUrl(emoji) {
+  const codepoint = emojiToCodepoint(emoji);
+  if (!codepoint) return null;
+  return `${TWEMOJI_BASE_URL}/${codepoint}.png`;
+}
+
+function emojiAdvancePx(fontSizePx) {
+  return Math.max(1, Math.round(fontSizePx));
+}
+
+function measureMixedTextWidth(ctx, text, emojiSizePx) {
+  let width = 0;
+  for (const token of splitEmojiTokens(text)) {
+    if (token.type === "emoji") width += emojiAdvancePx(emojiSizePx);
+    else if (token.value) width += ctx.measureText(token.value).width;
+  }
+  return width;
+}
+
+async function loadEmojiImage(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Emoji fetch failed (${res.status})`);
+  const bytes = Buffer.from(await res.arrayBuffer());
+  return loadImage(bytes);
+}
+
+async function preloadEmojiImages(lines, cache = new Map()) {
+  const needed = new Set();
+  for (const line of lines) {
+    for (const token of splitEmojiTokens(line)) {
+      if (token.type === "emoji" && !cache.has(token.value)) {
+        needed.add(token.value);
+      }
+    }
+  }
+  await Promise.all(
+    [...needed].map(async (emoji) => {
+      const url = emojiImageUrl(emoji);
+      if (!url) {
+        cache.set(emoji, null);
+        return;
+      }
+      try {
+        const image = await loadEmojiImage(url);
+        cache.set(emoji, image);
+      } catch {
+        cache.set(emoji, null);
+      }
+    })
+  );
+  return cache;
+}
+
+function drawMixedTextRun(ctx, text, x, y, emojiSizePx, emojiCache = null) {
+  let cursorX = x;
+  for (const token of splitEmojiTokens(text)) {
+    if (token.type === "emoji") {
+      const size = emojiAdvancePx(emojiSizePx);
+      const image = emojiCache?.get(token.value) ?? null;
+      if (image) {
+        ctx.drawImage(image, cursorX, y, size, size);
+      } else {
+        ctx.fillText(token.value, cursorX, y);
+      }
+      cursorX += size;
+    } else if (token.value) {
+      ctx.fillText(token.value, cursorX, y);
+      cursorX += ctx.measureText(token.value).width;
+    }
+  }
+}
+
 function parseStyleAttr(styleStr) {
   const out = {};
   for (const part of String(styleStr || "").split(";")) {
@@ -375,7 +496,7 @@ function wrapStyledLines(lines, ctx, maxWidth, drawScale) {
 
     for (const word of words) {
       ctx.font = buildFontString(word.style, drawScale);
-      const w = ctx.measureText(word.text).width;
+      const w = measureMixedTextWidth(ctx, word.text, word.style.fontSize * drawScale);
       if (current.length && currentWidth + w > maxWidth && !/^\s+$/.test(word.text)) {
         flush();
       }
@@ -391,7 +512,7 @@ function wrapStyledLines(lines, ctx, maxWidth, drawScale) {
   return wrapped;
 }
 
-function drawRun(ctx, run, x, y, drawScale) {
+function drawRun(ctx, run, x, y, drawScale, emojiCache = null) {
   const style = run.style;
   ctx.save();
   ctx.font = buildFontString(style, drawScale);
@@ -406,15 +527,37 @@ function drawRun(ctx, run, x, y, drawScale) {
     ctx.shadowOffsetY = style.shadow.oy * drawScale;
   }
 
-  if (style.strokeWidth > 0) {
-    ctx.lineWidth = style.strokeWidth * drawScale;
-    ctx.strokeStyle = style.strokeColor;
-    ctx.lineJoin = "round";
-    ctx.strokeText(run.text, x, y);
+  const emojiSize = emojiAdvancePx(style.fontSize * drawScale);
+  let cursorX = x;
+  for (const token of splitEmojiTokens(run.text)) {
+    if (token.type === "emoji") {
+      const image = emojiCache?.get(token.value) ?? null;
+      if (image) {
+        ctx.drawImage(image, cursorX, y, emojiSize, emojiSize);
+      } else {
+        if (style.strokeWidth > 0) {
+          ctx.lineWidth = style.strokeWidth * drawScale;
+          ctx.strokeStyle = style.strokeColor;
+          ctx.lineJoin = "round";
+          ctx.strokeText(token.value, cursorX, y);
+        }
+        ctx.fillStyle = style.color.includes("rgb") ? style.color : hexToRgba(style.color, style.opacity);
+        ctx.fillText(token.value, cursorX, y);
+      }
+      cursorX += emojiSize;
+      continue;
+    }
+    if (!token.value) continue;
+    if (style.strokeWidth > 0) {
+      ctx.lineWidth = style.strokeWidth * drawScale;
+      ctx.strokeStyle = style.strokeColor;
+      ctx.lineJoin = "round";
+      ctx.strokeText(token.value, cursorX, y);
+    }
+    ctx.fillStyle = style.color.includes("rgb") ? style.color : hexToRgba(style.color, style.opacity);
+    ctx.fillText(token.value, cursorX, y);
+    cursorX += ctx.measureText(token.value).width;
   }
-
-  ctx.fillStyle = style.color.includes("rgb") ? style.color : hexToRgba(style.color, style.opacity);
-  ctx.fillText(run.text, x, y);
   ctx.restore();
 }
 
@@ -449,12 +592,16 @@ function measureRunsWidth(ctx, runs, drawScale) {
   let width = 0;
   for (const run of runs) {
     ctx.font = buildFontString(run.style, drawScale);
-    width += ctx.measureText(run.text).width;
+    width += measureMixedTextWidth(ctx, run.text, run.style.fontSize * drawScale);
   }
   return width;
 }
 
-function drawStyledLines(ctx, wrappedLines, { ew, paddingH, drawScale, align, offsetY = 0 }) {
+function drawStyledLines(
+  ctx,
+  wrappedLines,
+  { ew, paddingH, drawScale, align, offsetY = 0, emojiCache = null }
+) {
   let y = offsetY;
   for (const line of wrappedLines) {
     const lineWidth = measureRunsWidth(ctx, line.runs, drawScale);
@@ -463,16 +610,16 @@ function drawStyledLines(ctx, wrappedLines, { ew, paddingH, drawScale, align, of
     else if (align === "right") x = Math.max(paddingH * drawScale, ew - paddingH * drawScale - lineWidth);
 
     for (const run of line.runs) {
-      drawRun(ctx, run, x, y, drawScale);
+      drawRun(ctx, run, x, y, drawScale, emojiCache);
       ctx.font = buildFontString(run.style, drawScale);
-      x += ctx.measureText(run.text).width;
+      x += measureMixedTextWidth(ctx, run.text, run.style.fontSize * drawScale);
     }
     y += line.lineHeightPx;
   }
   return y - offsetY;
 }
 
-function wrapPlainLines(ctx, text, maxWidth) {
+function wrapPlainLines(ctx, text, maxWidth, emojiSizePx) {
   const paragraphs = String(text || "").split("\n");
   const lines = [];
   for (const para of paragraphs) {
@@ -484,7 +631,7 @@ function wrapPlainLines(ctx, text, maxWidth) {
     let line = words[0];
     for (let i = 1; i < words.length; i++) {
       const test = `${line} ${words[i]}`;
-      if (ctx.measureText(test).width <= maxWidth) line = test;
+      if (measureMixedTextWidth(ctx, test, emojiSizePx) <= maxWidth) line = test;
       else {
         lines.push(line);
         line = words[i];
@@ -495,7 +642,15 @@ function wrapPlainLines(ctx, text, maxWidth) {
   return lines;
 }
 
-function buildStyledTextCanvas({ styledHtml, settings, ew, drawScale, paddingH, align, registry }) {
+async function buildStyledTextCanvas({
+  styledHtml,
+  settings,
+  ew,
+  drawScale,
+  paddingH,
+  align,
+  registry,
+}) {
   const parsed = parseStyledLines(styledHtml, settings, registry);
   const measureCanvas = createCanvas(ew, 10);
   const mctx = measureCanvas.getContext("2d");
@@ -509,17 +664,31 @@ function buildStyledTextCanvas({ styledHtml, settings, ew, drawScale, paddingH, 
     Math.max(2, Math.ceil(measuredHeight + pad.top + pad.bottom))
   );
   const tctx = textCanvas.getContext("2d");
+  const allStyledLines = [];
+  for (const line of wrapped) {
+    allStyledLines.push(line.runs.map((run) => run.text).join(""));
+  }
+  const emojiCache = await preloadEmojiImages(allStyledLines, new Map());
   const textHeight = drawStyledLines(tctx, wrapped, {
     ew,
     paddingH,
     drawScale,
     align,
     offsetY: pad.top,
+    emojiCache,
   });
   return { textCanvas, textHeight: Math.ceil(textHeight) + 20, textOffsetY: pad.top };
 }
 
-function buildPlainTextCanvas({ plainText, settings, ew, drawScale, paddingH, align, family }) {
+async function buildPlainTextCanvas({
+  plainText,
+  settings,
+  ew,
+  drawScale,
+  paddingH,
+  align,
+  family,
+}) {
   const fontSize = Number(settings.fontSize ?? 48);
   const lineHeight = Number(settings.lineHeight ?? 1.35);
   const fontWeight = settings.bold ? "700" : "400";
@@ -539,7 +708,8 @@ function buildPlainTextCanvas({ plainText, settings, ew, drawScale, paddingH, al
   mctx.font = `${fontStyle} ${fontWeight} ${fontSize * drawScale}px ${family}`;
   const maxTextWidth = ew - paddingH * 2 * drawScale;
   const lineHeightPx = fontSize * lineHeight * drawScale;
-  const lines = wrapPlainLines(mctx, plainText, maxTextWidth);
+  const emojiSizePx = fontSize * drawScale;
+  const lines = wrapPlainLines(mctx, plainText, maxTextWidth, emojiSizePx);
   const textHeight = lines.length * lineHeightPx + 20;
   const scaledStroke = strokeWidth * drawScale;
   const strokePad = Math.max(0, scaledStroke / 2);
@@ -557,16 +727,18 @@ function buildPlainTextCanvas({ plainText, settings, ew, drawScale, paddingH, al
   const tctx = textCanvas.getContext("2d");
   tctx.font = mctx.font;
   tctx.textBaseline = "top";
+  const emojiCache = await preloadEmojiImages(lines, new Map());
 
   let y = textOffsetY;
   for (const line of lines) {
+    const lineWidth = measureMixedTextWidth(tctx, line, emojiSizePx);
     let x = paddingH * drawScale;
     if (align === "center") {
-      tctx.textAlign = "center";
-      x = ew / 2;
+      tctx.textAlign = "left";
+      x = Math.max(paddingH * drawScale, (ew - lineWidth) / 2);
     } else if (align === "right") {
-      tctx.textAlign = "right";
-      x = ew - paddingH * drawScale;
+      tctx.textAlign = "left";
+      x = Math.max(paddingH * drawScale, ew - paddingH * drawScale - lineWidth);
     } else {
       tctx.textAlign = "left";
     }
@@ -586,10 +758,18 @@ function buildPlainTextCanvas({ plainText, settings, ew, drawScale, paddingH, al
       tctx.lineWidth = scaledStroke;
       tctx.strokeStyle = hexToRgba(strokeColor, strokeOpacity);
       tctx.lineJoin = "round";
-      tctx.strokeText(line, x, y);
+      let sx = x;
+      for (const token of splitEmojiTokens(line)) {
+        if (token.type === "text" && token.value) {
+          tctx.strokeText(token.value, sx, y);
+          sx += tctx.measureText(token.value).width;
+        } else if (token.type === "emoji") {
+          sx += emojiAdvancePx(emojiSizePx);
+        }
+      }
     }
     tctx.fillStyle = settings.fontColor || "#ffffff";
-    tctx.fillText(line, x, y);
+    drawMixedTextRun(tctx, line, x, y, emojiSizePx, emojiCache);
     y += lineHeightPx;
   }
 
@@ -783,7 +963,7 @@ async function main() {
     text.editMode !== "plain" && text.styledHtml && String(text.styledHtml).trim();
 
   const textLayer = styledMode
-    ? buildStyledTextCanvas({
+    ? await buildStyledTextCanvas({
         styledHtml: text.styledHtml,
         settings: { ...settings, fontFamily: defaultFamily },
         ew,
@@ -792,7 +972,7 @@ async function main() {
         align,
         registry,
       })
-    : buildPlainTextCanvas({
+    : await buildPlainTextCanvas({
         plainText,
         settings: { ...settings, fontFamily: defaultFamily },
         ew,
