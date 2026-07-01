@@ -202,16 +202,22 @@ function buildFitFilter(width, height, fitMode = "cover", { transparentPad = fal
 }
 
 function buildScrollFilter(yExpr, textOffsetY = 0, {
+  bgEffectsInputIndex = null,
   overlayInputIndex = null,
   overlayWidth = 0,
   overlayHeight = 0,
   overlayFitMode = "cover",
 } = {}) {
   const y = Number(textOffsetY) ? `(${yExpr})-${Number(textOffsetY)}` : yExpr;
-  const parts = [
-    `[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[bg]`,
-    `[bg][1:v]overlay=x=0:y='${y}':eval=frame:format=auto[vtxt]`,
-  ];
+  const parts = [`[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[bg]`];
+  const bgLabel = bgEffectsInputIndex == null ? "bg" : "bgfx";
+  if (bgEffectsInputIndex != null) {
+    parts.push(
+      `[${bgEffectsInputIndex}:v]format=rgba[bgefx]`,
+      "[bg][bgefx]overlay=x=0:y=0:eval=frame:format=auto[bgfx]"
+    );
+  }
+  parts.push(`[${bgLabel}][1:v]overlay=x=0:y='${y}':eval=frame:format=auto[vtxt]`);
   if (overlayInputIndex == null) {
     parts.push("[vtxt]null[vout]");
     return parts.join(";");
@@ -272,6 +278,15 @@ function appendBackgroundInput(args, {
   args.push("-t", String(dur), "-i", bgImagePath);
 }
 
+function appendBackgroundEffectsInput(args, {
+  backgroundEffectsPath,
+  fps,
+  dur,
+}) {
+  if (!backgroundEffectsPath) return;
+  args.push("-loop", "1", "-framerate", String(fps), "-t", String(dur), "-i", backgroundEffectsPath);
+}
+
 function appendOverlayInput(args, {
   overlayPath,
   fps,
@@ -298,6 +313,7 @@ export async function encodeScrollSegment({
   bgImagePath,
   backgroundIsVideo = false,
   backgroundDurationSec = 0,
+  backgroundEffectsPath = null,
   overlayPath = null,
   overlayIsVideo = false,
   overlayDurationSec = 0,
@@ -324,9 +340,11 @@ export async function encodeScrollSegment({
   const crf = process.env.CLOUD_ENCODE_CRF || "28";
   const dur = Math.max(0.1, Number(segmentDuration) || 1);
   const yExpr = scrollYExpr({ startDelay, startY, endY, speedY, timeOffsetSec });
+  const hasEffects = !!backgroundEffectsPath;
   const hasOverlay = !!overlayPath;
   const filter = buildScrollFilter(yExpr, textOffsetY, {
-    overlayInputIndex: hasOverlay ? 2 : null,
+    bgEffectsInputIndex: hasEffects ? 2 : null,
+    overlayInputIndex: hasOverlay ? (hasEffects ? 3 : 2) : null,
     overlayWidth: frameWidth || textStripWidth,
     overlayHeight: frameHeight || 1920,
     overlayFitMode,
@@ -346,6 +364,11 @@ export async function encodeScrollSegment({
     textStripWidth,
     textStripHeight,
     textStripIsRaw,
+    fps,
+    dur,
+  });
+  appendBackgroundEffectsInput(args, {
+    backgroundEffectsPath,
     fps,
     dur,
   });
@@ -463,6 +486,7 @@ export async function encodeScrollVideo({
   bgImagePath,
   backgroundIsVideo = false,
   backgroundDurationSec = 0,
+  backgroundEffectsPath = null,
   overlayPath = null,
   overlayIsVideo = false,
   overlayDurationSec = 0,
@@ -493,9 +517,11 @@ export async function encodeScrollVideo({
   const crf = process.env.CLOUD_ENCODE_CRF || "28";
   const yExpr = scrollYExpr({ startDelay, startY, endY, speedY });
   const dur = Math.max(0.1, Number(totalDuration) || 1);
+  const hasEffects = !!backgroundEffectsPath;
   const hasOverlay = !!overlayPath;
   const filter = buildScrollFilter(yExpr, textOffsetY, {
-    overlayInputIndex: hasOverlay ? 2 : null,
+    bgEffectsInputIndex: hasEffects ? 2 : null,
+    overlayInputIndex: hasOverlay ? (hasEffects ? 3 : 2) : null,
     overlayWidth: frameWidth,
     overlayHeight: frameHeight,
     overlayFitMode,
@@ -520,6 +546,11 @@ export async function encodeScrollVideo({
     fps,
     dur,
   });
+  appendBackgroundEffectsInput(args, {
+    backgroundEffectsPath,
+    fps,
+    dur,
+  });
 
   appendOverlayInput(args, {
     overlayPath,
@@ -532,7 +563,9 @@ export async function encodeScrollVideo({
 
   const hasMusic = !!musicPath;
   const hasVoice = !!voicePath;
-  const audioStartIndex = hasOverlay ? 3 : 2;
+  const audioStartIndex = hasOverlay
+    ? (hasEffects ? 4 : 3)
+    : (hasEffects ? 3 : 2);
 
   if (hasMusic) {
     if (musicLoop) args.push("-stream_loop", "-1");

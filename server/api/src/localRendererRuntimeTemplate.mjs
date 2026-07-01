@@ -37,6 +37,58 @@ function hexToRgba(hex, alpha = 1) {
   return `rgba(${r || 255},${g || 255},${b || 255},${a})`;
 }
 
+function clampPercent(value, fallback = 55) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(5, Math.min(100, n));
+}
+
+function drawVignette(ctx, w, h, effects) {
+  if (!effects.vignetteEnabled) return;
+  const rx = clampPercent(effects.vignetteRadiusX);
+  const ry = clampPercent(effects.vignetteRadiusY);
+  const softness = Math.max(0, Math.min(100, effects.vignetteSoftness ?? 50)) / 100;
+  const radius = Math.min(rx, ry);
+  const inner = Math.max(0, radius * (1 - softness * 0.98)) / 100;
+  const alpha = Math.max(0, Math.min(1, (effects.vignetteOpacity ?? 100) / 100));
+  const color = hexToRgba(effects.vignetteColor || "#000000", alpha);
+  const rxR = (rx / 100) * w;
+  const ryR = (ry / 100) * h;
+  if (rxR <= 0 || ryR <= 0) return;
+
+  ctx.save();
+  ctx.translate(w / 2, h / 2);
+  ctx.scale(rxR, ryR);
+  const g = ctx.createRadialGradient(0, 0, inner, 0, 0, 1);
+  g.addColorStop(0, "rgba(0,0,0,0)");
+  g.addColorStop(Math.min(0.98, inner), "rgba(0,0,0,0)");
+  g.addColorStop(1, color);
+  ctx.fillStyle = g;
+  ctx.fillRect(-1, -1, 2, 2);
+  ctx.restore();
+}
+
+function drawColorOverlay(ctx, w, h, effects) {
+  if (!effects.colorOverlayEnabled) return;
+  const alpha = Math.max(0, Math.min(1, (effects.colorOverlayOpacity ?? 40) / 100));
+  ctx.fillStyle = hexToRgba(effects.colorOverlayColor || "#000000", alpha);
+  ctx.fillRect(0, 0, w, h);
+}
+
+function readBgEffects(settings = {}) {
+  return {
+    vignetteEnabled: !!settings.vignetteEnabled,
+    vignetteColor: settings.vignetteColor || "#000000",
+    vignetteRadiusX: settings.vignetteRadiusX ?? 55,
+    vignetteRadiusY: settings.vignetteRadiusY ?? 55,
+    vignetteSoftness: settings.vignetteSoftness ?? 50,
+    vignetteOpacity: settings.vignetteOpacity ?? 100,
+    colorOverlayEnabled: !!settings.colorOverlayEnabled,
+    colorOverlayColor: settings.colorOverlayColor || "#000000",
+    colorOverlayOpacity: settings.colorOverlayOpacity ?? 40,
+  };
+}
+
 function evenDimension(n) {
   const v = Math.max(2, Math.round(n));
   return v % 2 === 0 ? v : v - 1;
@@ -622,6 +674,8 @@ async function main() {
       : stripTags(text.styledHtml || text.plainText || "");
   const bgFitMode = settings.fitMode || "cover";
   const overlayFitMode = settings.overlayFitMode || bgFitMode;
+  const bgEffects = readBgEffects(settings);
+  const hasBgEffects = !!(bgEffects.vignetteEnabled || bgEffects.colorOverlayEnabled);
 
   const styledMode =
     text.editMode !== "plain" && text.styledHtml && String(text.styledHtml).trim();
@@ -671,7 +725,15 @@ async function main() {
   const voicePath = await firstMediaFile(path.join(bundle, "media", "voiceover"));
   const tmpDir = await mkdtemp(path.join(os.tmpdir(), "mm-local-render-"));
   const textPngPath = path.join(tmpDir, "text-strip.png");
+  const bgEffectsPath = path.join(tmpDir, "bg-effects.png");
   await writeFile(textPngPath, textCanvas.toBuffer("image/png"));
+  if (hasBgEffects) {
+    const effectsCanvas = createCanvas(ew, eh);
+    const effectsCtx = effectsCanvas.getContext("2d");
+    drawVignette(effectsCtx, ew, eh, bgEffects);
+    drawColorOverlay(effectsCtx, ew, eh, bgEffects);
+    await writeFile(bgEffectsPath, effectsCanvas.toBuffer("image/png"));
+  }
 
   try {
     let bgRenderPath = bgPath;
@@ -742,6 +804,19 @@ async function main() {
       textPngPath
     );
 
+    if (hasBgEffects) {
+      args.push(
+        "-loop",
+        "1",
+        "-framerate",
+        String(FPS),
+        "-t",
+        String(totalDuration),
+        "-i",
+        bgEffectsPath
+      );
+    }
+
     if (overlayRenderPath) {
       if (overlayIsVideo) {
         args.push("-stream_loop", "-1", "-t", String(totalDuration), "-i", overlayRenderPath);
@@ -761,7 +836,10 @@ async function main() {
 
     const hasMusic = !!musicPath;
     const hasVoice = !!voicePath;
-    const audioStartIndex = overlayRenderPath ? 3 : 2;
+    const overlayInputIndex = overlayRenderPath ? (hasBgEffects ? 3 : 2) : -1;
+    const audioStartIndex = overlayRenderPath
+      ? (hasBgEffects ? 4 : 3)
+      : (hasBgEffects ? 3 : 2);
     const musicIndex = hasMusic ? audioStartIndex : -1;
     const voiceIndex = hasVoice ? (hasMusic ? audioStartIndex + 1 : audioStartIndex) : -1;
     if (hasMusic) {
@@ -774,12 +852,21 @@ async function main() {
 
     const filterParts = [];
     const basePart = bgRenderPath
-      ? `[0:v]scale=${ew}:${eh}:force_original_aspect_ratio=increase,crop=${ew}:${eh},format=yuv420p[bg];[bg][1:v]overlay=x=0:y='${overlayYExpr}':eval=frame:format=auto[vtxt]`
-      : `[0:v]format=yuv420p[bg];[bg][1:v]overlay=x=0:y='${overlayYExpr}':eval=frame:format=auto[vtxt]`;
+      ? `[0:v]scale=${ew}:${eh}:force_original_aspect_ratio=increase,crop=${ew}:${eh},format=yuv420p[bg]`
+      : `[0:v]format=yuv420p[bg]`;
     filterParts.push(basePart);
+    if (hasBgEffects) {
+      filterParts.push(
+        "[2:v]format=rgba[bgefx]",
+        "[bg][bgefx]overlay=x=0:y=0:eval=frame:format=auto[bgfx]"
+      );
+    }
+    filterParts.push(
+      `[${hasBgEffects ? "bgfx" : "bg"}][1:v]overlay=x=0:y='${overlayYExpr}':eval=frame:format=auto[vtxt]`
+    );
     if (overlayRenderPath) {
       filterParts.push(
-        `[2:v]${buildFitFilter(ew, eh, overlayFitMode, { transparentPad: true })},format=rgba[ovr]`,
+        `[${overlayInputIndex}:v]${buildFitFilter(ew, eh, overlayFitMode, { transparentPad: true })},format=rgba[ovr]`,
         "[vtxt][ovr]overlay=x=0:y=0:eval=frame:format=auto[vout]"
       );
     } else {

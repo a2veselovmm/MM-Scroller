@@ -13,6 +13,7 @@ import {
   prepareBackgroundVideo,
   probeVideoDurationSec,
   writeJpeg,
+  writePng,
   writeRawRgba,
 } from "./ffmpegScrollEncode.js";
 import { normalizeOpacity } from "./renderUtils.js";
@@ -394,6 +395,7 @@ export async function renderJob({
   let overlayInputPath = overlayPath || null;
   let overlayIsVideo = false;
   let overlayDurationSec = 0;
+  let backgroundEffectsPath = null;
   let frameWidth = 0;
   let frameHeight = 0;
   const timings = { fontsMs: 0, canvasMs: 0, ffmpegMs: 0 };
@@ -454,6 +456,8 @@ export async function renderJob({
     textOffsetY = Number(built.textOffsetY || 0);
 
     const videoBackgroundPath = isVideoMediaPath(backgroundPath) ? backgroundPath : null;
+    const bgEffects = readBgEffects(settings);
+    const hasBgEffects = !!(bgEffects.vignetteEnabled || bgEffects.colorOverlayEnabled);
     if (videoBackgroundPath) {
       backgroundIsVideo = true;
       const bgFitMode = settings.fitMode || "cover";
@@ -478,6 +482,14 @@ export async function renderJob({
         bgImagePath = boomerangBg;
       } else {
         bgImagePath = preparedBg;
+      }
+      if (hasBgEffects) {
+        const effectsCanvas = createCanvas(built.ew, built.eh);
+        const ectx = effectsCanvas.getContext("2d");
+        drawVignette(ectx, built.ew, built.eh, bgEffects);
+        drawColorOverlay(ectx, built.ew, built.eh, bgEffects);
+        backgroundEffectsPath = path.join(workDir, "bg-effects.png");
+        await writePng(effectsCanvas, backgroundEffectsPath);
       }
       backgroundDurationSec = await probeVideoDurationSec(bgImagePath);
     } else {
@@ -506,6 +518,7 @@ export async function renderJob({
     bgImagePath,
     backgroundIsVideo,
     backgroundDurationSec,
+    backgroundEffectsPath,
     overlayPath: overlayInputPath,
     overlayIsVideo,
     overlayDurationSec,
